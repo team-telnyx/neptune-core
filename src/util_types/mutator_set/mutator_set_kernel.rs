@@ -14,7 +14,7 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use super::active_window::ActiveWindow;
+use super::active_window::SwbfSuffix;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
@@ -42,7 +42,7 @@ pub enum MutatorSetKernelError {
 pub struct MutatorSetKernel<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
-    pub swbf_active: ActiveWindow<H>,
+    pub swbf_active: SwbfSuffix<H, WINDOW_SIZE>,
 }
 
 // FIXME: Apply over-sampling to circumvent risk of duplicates.
@@ -76,7 +76,7 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
 
     let mut sponge = <H as SpongeHasher>::init();
     H::absorb_repeatedly(&mut sponge, input.iter());
-    H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
+    H::sample_indices(&mut sponge, WINDOW_SIZE as u32, NUM_TRIALS as usize)
         .into_iter()
         .map(|sample_index| sample_index as u128 + batch_offset)
         .collect_vec()
@@ -518,7 +518,7 @@ impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
             None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
         };
         index += 1;
-        let swbf_active = *ActiveWindow::decode(&sequence[index..(index + swbf_active_len)])?;
+        let swbf_active = *SwbfSuffix::decode(&sequence[index..(index + swbf_active_len)])?;
         index += swbf_active_len;
 
         if sequence.len() != index {
@@ -698,7 +698,7 @@ mod accumulation_scheme_tests {
             assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret
                 .iter()
-                .all(|&x| (x as u32) < WINDOW_SIZE + 17 * CHUNK_SIZE
+                .all(|&x| (x as u32) < WINDOW_SIZE as u32 + 17 * CHUNK_SIZE
                     && (x as u32) >= 17 * CHUNK_SIZE));
         }
     }

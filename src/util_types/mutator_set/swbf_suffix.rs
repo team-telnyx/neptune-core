@@ -12,26 +12,30 @@ use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
-pub struct ActiveWindow<H: AlgebraicHasher + BFieldCodec> {
+pub struct SwbfSuffix<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,
     #[bfield_codec(ignore)]
     _hasher: PhantomData<H>,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> PartialEq for ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> PartialEq
+    for SwbfSuffix<H, SUFFIX_SIZE>
+{
     fn eq(&self, other: &Self) -> bool {
         self.sbf == other.sbf
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> Default for ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> Default
+    for SwbfSuffix<H, SUFFIX_SIZE>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, SUFFIX_SIZE> {
     pub fn new() -> Self {
         Self {
             sbf: Vec::new(),
@@ -100,7 +104,7 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
 
     /// Undo a window slide.
     pub fn slide_window_back(&mut self, chunk: &Chunk) {
-        assert!(!self.hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
+        assert!(!self.hasset(WINDOW_SIZE as u32 - CHUNK_SIZE, WINDOW_SIZE as u32));
         for location in self.sbf.iter_mut() {
             *location += CHUNK_SIZE;
         }
@@ -113,7 +117,7 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
 
     pub fn insert(&mut self, index: u32) {
         assert!(
-            index < WINDOW_SIZE,
+            index < WINDOW_SIZE as u32,
             "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -124,7 +128,7 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
 
     pub fn remove(&mut self, index: u32) {
         assert!(
-            index < WINDOW_SIZE,
+            index < WINDOW_SIZE as u32,
             "index cannot exceed window size in `remove`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -153,7 +157,7 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
 
     pub fn contains(&self, index: u32) -> bool {
         assert!(
-            index < WINDOW_SIZE,
+            index < WINDOW_SIZE as u32,
             "index cannot exceed window size in `contains`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -186,7 +190,7 @@ mod active_window_tests {
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
+    impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, SUFFIX_SIZE> {
         fn new_from(sbf: Vec<u32>) -> Self {
             Self {
                 sbf,
@@ -198,7 +202,7 @@ mod active_window_tests {
     #[test]
     fn aw_is_reversible_bloom_filter() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
+        let mut aw = SwbfSuffix::<Tip5, WINDOW_SIZE>::new_from(sbf);
 
         // Insert an index twice, remove it once and the verify that
         // it is still there
@@ -217,14 +221,14 @@ mod active_window_tests {
     #[test]
     fn insert_remove_probe_indices_pbt() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
+        let mut aw = SwbfSuffix::<Tip5, WINDOW_SIZE>::new_from(sbf);
         for i in 0..100 {
             assert!(!aw.contains(i as u32));
         }
 
         let mut prng = thread_rng();
         for _ in 0..100 {
-            let index = prng.next_u32() % WINDOW_SIZE;
+            let index = prng.next_u32() % WINDOW_SIZE as u32;
             aw.insert(index);
 
             assert!(aw.contains(index));
@@ -242,33 +246,33 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window() {
-        let mut aw = ActiveWindow::<Tip5>::new();
+        let mut aw = SwbfSuffix::<Tip5, WINDOW_SIZE>::new();
 
         let num_insertions = 100;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
-            aw.insert(rng.next_u32() % WINDOW_SIZE);
+            aw.insert(rng.next_u32() % WINDOW_SIZE as u32);
         }
 
         aw.slide_window();
 
         // Verify that last N elements are zero after window slide
-        assert!(!aw.hasset(WINDOW_SIZE - CHUNK_SIZE, CHUNK_SIZE));
+        assert!(!aw.hasset(WINDOW_SIZE as u32 - CHUNK_SIZE, CHUNK_SIZE));
     }
 
     #[test]
     fn test_slide_window_back() {
         type Hasher = Tip5;
 
-        let mut active_window = ActiveWindow::<Hasher>::new();
+        let mut active_window = SwbfSuffix::<Hasher, WINDOW_SIZE>::new();
         let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
-            active_window.insert((rng.next_u32()) % WINDOW_SIZE);
+            active_window.insert((rng.next_u32()) % WINDOW_SIZE as u32);
         }
         let dummy_chunk = active_window.slid_chunk();
         active_window.slide_window();
-        assert!(!active_window.hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
+        assert!(!active_window.hasset(WINDOW_SIZE as u32 - CHUNK_SIZE, WINDOW_SIZE as u32));
 
         active_window.slide_window_back(&dummy_chunk);
         for index in dummy_chunk.relative_indices {
@@ -280,11 +284,11 @@ mod active_window_tests {
     fn test_slide_window_and_back() {
         type Hasher = Tip5;
 
-        let mut active_window = ActiveWindow::<Hasher>::new();
+        let mut active_window = SwbfSuffix::<Hasher, WINDOW_SIZE>::new();
         let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
-            active_window.insert((rng.next_u32()) % WINDOW_SIZE);
+            active_window.insert((rng.next_u32()) % WINDOW_SIZE as u32);
         }
         let aw_before = active_window.clone();
 
@@ -302,11 +306,11 @@ mod active_window_tests {
     }
 
     fn hash_unequal_prop<H: AlgebraicHasher + BFieldCodec>() {
-        H::hash(&ActiveWindow::<H>::new());
+        H::hash(&SwbfSuffix::<H, WINDOW_SIZE>::new());
 
-        let mut aw_1 = ActiveWindow::<H>::new();
+        let mut aw_1 = SwbfSuffix::<H, WINDOW_SIZE>::new();
         aw_1.insert(1u32);
-        let aw_2 = ActiveWindow::<H>::new();
+        let aw_2 = SwbfSuffix::<H, WINDOW_SIZE>::new();
 
         assert_ne!(H::hash(&aw_1), H::hash(&aw_2));
     }
@@ -323,9 +327,9 @@ mod active_window_tests {
     fn test_active_window_serialization() {
         type H = Tip5;
 
-        let aw0 = ActiveWindow::<H>::new();
+        let aw0 = SwbfSuffix::<H, WINDOW_SIZE>::new();
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
-        let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
+        let aw0_back = serde_json::from_str::<SwbfSuffix<H, WINDOW_SIZE>>(&json_aw0).unwrap();
         assert_eq!(aw0.sbf, aw0_back.sbf);
     }
 
@@ -334,12 +338,12 @@ mod active_window_tests {
         type H = Tip5;
         let mut rng = thread_rng();
 
-        let mut aw0 = ActiveWindow::<H>::new();
+        let mut aw0 = SwbfSuffix::<H, WINDOW_SIZE>::new();
         for _ in 0..37 {
-            aw0.insert(rng.next_u32() % WINDOW_SIZE);
+            aw0.insert(rng.next_u32() % WINDOW_SIZE as u32);
         }
         let encoded = aw0.encode();
-        let decoded = *ActiveWindow::decode(&encoded).unwrap();
+        let decoded = *SwbfSuffix::decode(&encoded).unwrap();
 
         assert_eq!(aw0, decoded);
     }

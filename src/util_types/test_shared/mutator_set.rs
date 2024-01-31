@@ -18,7 +18,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use twenty_first::util_types::storage_vec::StorageVec;
 
-use crate::util_types::mutator_set::active_window::ActiveWindow;
+use crate::util_types::mutator_set::active_window::SwbfSuffix;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::chunk_dictionary::{
@@ -345,13 +345,14 @@ pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
     (root, paths)
 }
 
-pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H> {
+pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize>(
+) -> SwbfSuffix<H, SUFFIX_SIZE> {
     let mut rng = thread_rng();
     let num_indices = 10 + (rng.next_u32() % 100) as usize;
 
-    let mut aw = ActiveWindow::<H>::new();
+    let mut aw = SwbfSuffix::<H, SUFFIX_SIZE>::new();
     for _ in 0..num_indices {
-        aw.insert(rng.next_u32() % WINDOW_SIZE);
+        aw.insert(rng.next_u32() % WINDOW_SIZE as u32);
     }
 
     aw

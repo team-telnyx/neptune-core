@@ -10,7 +10,7 @@ use twenty_first::util_types::{
 };
 
 use super::{
-    active_window::ActiveWindow, addition_record::AdditionRecord,
+    active_window::SwbfSuffix, addition_record::AdditionRecord,
     ms_membership_proof::MsMembershipProof, mutator_set_kernel::MutatorSetKernel,
     mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
 };
@@ -25,7 +25,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
         let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),
-            swbf_active: ActiveWindow::new(),
+            swbf_active: SwbfSuffix::new(),
         };
 
         Self {
@@ -39,7 +39,7 @@ impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
         let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),
-            swbf_active: ActiveWindow::new(),
+            swbf_active: SwbfSuffix::new(),
         };
 
         Self {

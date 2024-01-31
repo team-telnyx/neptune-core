@@ -60,7 +60,7 @@ impl BasicSnippet for ComputeIndices {
             data_type: DataType::U64,
         }));
         let get_swbf_indices = library.import(Box::new(GetSwbfIndices {
-            window_size: WINDOW_SIZE,
+            window_size: WINDOW_SIZE as u32,
             num_trials: NUM_TRIALS as usize,
         }));
 
@@ -184,7 +184,7 @@ impl Function for ComputeIndices {
         stack.push(item.values()[1]);
         stack.push(item.values()[0]);
         let get_swbf_indices = GetSwbfIndices {
-            window_size: WINDOW_SIZE,
+            window_size: WINDOW_SIZE as u32,
             num_trials: NUM_TRIALS as usize,
         };
         get_swbf_indices.rust_shadow(stack, memory);

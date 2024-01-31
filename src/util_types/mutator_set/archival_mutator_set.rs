@@ -1,4 +1,5 @@
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
@@ -11,7 +12,7 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_vec::traits::*;
 
-use super::active_window::ActiveWindow;
+use super::active_window::SwbfSuffix;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
@@ -115,7 +116,7 @@ where
             kernel: MutatorSetKernel {
                 aocl,
                 swbf_inactive,
-                swbf_active: ActiveWindow::new(),
+                swbf_active: SwbfSuffix::<H, WINDOW_SIZE>::new(),
             },
             chunks,
         }
@@ -125,7 +126,7 @@ where
         aocl: MmrStorage,
         swbf_inactive: MmrStorage,
         chunks: ChunkStorage,
-        active_window: ActiveWindow<H>,
+        active_window: SwbfSuffix<H, WINDOW_SIZE>,
     ) -> Self {
         let aocl: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(aocl);
         let swbf_inactive: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(swbf_inactive);

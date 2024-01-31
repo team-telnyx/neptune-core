@@ -7,8 +7,9 @@ use twenty_first::{
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
 };
 
+use super::shared::WINDOW_SIZE;
 use super::{
-    active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
+    active_window::SwbfSuffix, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
     mutator_set_kernel::MutatorSetKernel,
 };
 
@@ -42,7 +43,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
         let kernel = MutatorSetKernel::<H, ArchivalMmr<H, AmsMmrStorage>> {
             aocl: ArchivalMmr::<H, AmsMmrStorage>::new(aocl),
             swbf_inactive: ArchivalMmr::<H, AmsMmrStorage>::new(swbfi),
-            swbf_active: ActiveWindow::<H>::new(),
+            swbf_active: SwbfSuffix::<H, WINDOW_SIZE>::new(),
         };
 
         let ams = ArchivalMutatorSet::<H, AmsMmrStorage, AmsChunkStorage> { chunks, kernel };
