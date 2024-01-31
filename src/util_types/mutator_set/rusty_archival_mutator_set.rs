@@ -9,8 +9,8 @@ use twenty_first::{
 
 use super::shared::WINDOW_SIZE;
 use super::{
-    active_window::SwbfSuffix, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
-    mutator_set_kernel::MutatorSetKernel,
+    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
+    swbf_suffix::SwbfSuffix,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;

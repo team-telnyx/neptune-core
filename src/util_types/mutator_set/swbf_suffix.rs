@@ -9,7 +9,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk::Chunk;
-use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
+use super::shared::CHUNK_SIZE;
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct SwbfSuffix<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> {
@@ -104,7 +104,7 @@ impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, S
 
     /// Undo a window slide.
     pub fn slide_window_back(&mut self, chunk: &Chunk) {
-        assert!(!self.hasset(WINDOW_SIZE as u32 - CHUNK_SIZE, WINDOW_SIZE as u32));
+        assert!(!self.hasset(SUFFIX_SIZE as u32 - CHUNK_SIZE, SUFFIX_SIZE as u32));
         for location in self.sbf.iter_mut() {
             *location += CHUNK_SIZE;
         }
@@ -117,9 +117,9 @@ impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, S
 
     pub fn insert(&mut self, index: u32) {
         assert!(
-            index < WINDOW_SIZE as u32,
-            "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
+            index < SUFFIX_SIZE as u32,
+            "index cannot exceed window size in `insert`. SUFFIX_SIZE = {}, got index = {}",
+            SUFFIX_SIZE,
             index
         );
         self.sbf.push(index);
@@ -128,9 +128,9 @@ impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, S
 
     pub fn remove(&mut self, index: u32) {
         assert!(
-            index < WINDOW_SIZE as u32,
-            "index cannot exceed window size in `remove`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
+            index < SUFFIX_SIZE as u32,
+            "index cannot exceed window size in `remove`. SUFFIX_SIZE = {}, got index = {}",
+            SUFFIX_SIZE,
             index
         );
 
@@ -157,9 +157,9 @@ impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, S
 
     pub fn contains(&self, index: u32) -> bool {
         assert!(
-            index < WINDOW_SIZE as u32,
-            "index cannot exceed window size in `contains`. WINDOW_SIZE = {}, got index = {}",
-            WINDOW_SIZE,
+            index < SUFFIX_SIZE as u32,
+            "index cannot exceed window size in `contains`. SUFFIX_SIZE = {}, got index = {}",
+            SUFFIX_SIZE,
             index
         );
 
@@ -185,6 +185,8 @@ impl<H: AlgebraicHasher + BFieldCodec, const SUFFIX_SIZE: usize> SwbfSuffix<H, S
 
 #[cfg(test)]
 mod active_window_tests {
+
+    const WINDOW_SIZE: usize = 1 << 13;
 
     use super::*;
     use rand::{thread_rng, RngCore};

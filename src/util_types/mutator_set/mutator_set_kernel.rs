@@ -14,7 +14,6 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use super::active_window::SwbfSuffix;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
@@ -22,6 +21,7 @@ use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
 use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
+use super::swbf_suffix::SwbfSuffix;
 
 impl Error for MutatorSetKernelError {}
 

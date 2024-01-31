@@ -18,7 +18,6 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use twenty_first::util_types::storage_vec::StorageVec;
 
-use crate::util_types::mutator_set::active_window::SwbfSuffix;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::chunk_dictionary::{
@@ -33,6 +32,7 @@ use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
+use crate::util_types::mutator_set::swbf_suffix::SwbfSuffix;
 
 pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
     let mut rng = thread_rng();

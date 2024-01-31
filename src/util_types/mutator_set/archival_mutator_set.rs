@@ -12,7 +12,6 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_vec::traits::*;
 
-use super::active_window::SwbfSuffix;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
@@ -22,6 +21,7 @@ use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKe
 use super::mutator_set_trait::MutatorSet;
 use super::removal_record::RemovalRecord;
 use super::shared::CHUNK_SIZE;
+use super::swbf_suffix::SwbfSuffix;
 
 pub struct ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
 where

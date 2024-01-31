@@ -10,9 +10,9 @@ use twenty_first::util_types::{
 };
 
 use super::{
-    active_window::SwbfSuffix, addition_record::AdditionRecord,
-    ms_membership_proof::MsMembershipProof, mutator_set_kernel::MutatorSetKernel,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
+    mutator_set_kernel::MutatorSetKernel, mutator_set_trait::MutatorSet,
+    removal_record::RemovalRecord, swbf_suffix::SwbfSuffix,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
