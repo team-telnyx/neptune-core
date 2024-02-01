@@ -314,10 +314,11 @@ impl MainLoopHandler {
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 let (tip_hash, tip_proof_of_work_family) = (
-                    global_state_mut.chain.light_state().hash(),
+                    global_state_mut.chain.light_state().block.hash(),
                     global_state_mut
                         .chain
                         .light_state()
+                        .block
                         .kernel
                         .header
                         .proof_of_work_family,
@@ -382,6 +383,7 @@ impl MainLoopHandler {
                     let tip_proof_of_work_family = global_state_mut
                         .chain
                         .light_state()
+                        .block
                         .kernel
                         .header
                         .proof_of_work_family;
@@ -453,8 +455,9 @@ impl MainLoopHandler {
                 // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
                 // the client into synchronization mode.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let own_header = &global_state_mut.chain.light_state().block.header();
                 if enter_sync_mode(
-                    global_state_mut.chain.light_state().header(),
+                    own_header,
                     claimed_state,
                     global_state_mut.cli.max_number_of_blocks_before_syncing / 3,
                 ) {
@@ -477,10 +480,10 @@ impl MainLoopHandler {
 
                 // Get out of sync mode if needed.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-
+                let global_header = &global_state_mut.chain.light_state().block.header();
                 if global_state_mut.net.syncing {
                     let stay_in_sync_mode = stay_in_sync_mode(
-                        global_state_mut.chain.light_state().header(),
+                        global_header,
                         &main_loop_state.sync_state,
                         global_state_mut.cli.max_number_of_blocks_before_syncing,
                     );
@@ -512,7 +515,7 @@ impl MainLoopHandler {
 
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if pt2m_transaction.confirmable_for_block
-                    != global_state_mut.chain.light_state().hash()
+                    != global_state_mut.chain.light_state().block.hash()
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
@@ -721,11 +724,12 @@ impl MainLoopHandler {
 
         // Check when latest batch of blocks was requested
         let (current_block_hash, current_block_height, current_block_proof_of_work_family) = (
-            global_state.chain.light_state().hash(),
-            global_state.chain.light_state().kernel.header.height,
+            global_state.chain.light_state().block.hash(),
+            global_state.chain.light_state().block.kernel.header.height,
             global_state
                 .chain
                 .light_state()
+                .block
                 .kernel
                 .header
                 .proof_of_work_family,

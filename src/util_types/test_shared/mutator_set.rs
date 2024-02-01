@@ -80,12 +80,18 @@ pub fn empty_rusty_mutator_set<H: AlgebraicHasher + BFieldCodec>() -> RustyArchi
 
 pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
+    active_window_chunks: &ChunkDictionary<H>,
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
     let addition_record = commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
-    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
-    mutator_set.add_helper(&addition_record);
+    let membership_proof = mutator_set.prove(
+        new_item,
+        sender_randomness,
+        receiver_preimage,
+        active_window_chunks,
+    );
+    mutator_set.add(&addition_record);
 
     (membership_proof, new_item)
 }
@@ -406,7 +412,7 @@ mod shared_tests_test {
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams);
         let _ = make_item_and_randomnesses();
-        let _ = insert_mock_item(&mut ams.kernel);
+        let _ = insert_mock_item(&mut ams.kernel, &rcd);
     }
 
     #[test]

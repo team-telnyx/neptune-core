@@ -37,3 +37,12 @@ impl MastHash for BlockKernel {
         ]
     }
 }
+
+impl BlockKernel {
+    pub fn empty_kernel() -> Self {
+        Self {
+            header: BlockHeader::empty_header(),
+            body: BlockBody::empty_body(),
+        }
+    }
+}

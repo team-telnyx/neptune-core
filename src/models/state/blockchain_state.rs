@@ -63,10 +63,10 @@ impl BlockchainState {
 
     /// retrieve light state, ie the current tip.
     #[inline]
-    pub fn light_state(&self) -> &LightState {
+    pub fn light_state(&self) -> LightState {
         match self {
-            Self::Archival(bac) => &bac.light_state,
-            Self::Light(light_state) => light_state,
+            Self::Archival(bac) => bac.light_state.clone(),
+            Self::Light(light_state) => light_state.clone(),
         }
     }
 

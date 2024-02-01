@@ -1,3 +1,4 @@
+use crate::models::state::light_state::LightState;
 use crate::prelude::twenty_first;
 
 use anyhow::{bail, Result};
@@ -208,7 +209,7 @@ impl WalletState {
             }
 
             ret.update_wallet_state_with_new_block(
-                &MutatorSetAccumulator::default(),
+                &LightState::before_genesis(),
                 &Block::genesis_block(),
             )
             .await
@@ -279,7 +280,7 @@ impl WalletState {
     /// is valid and that the wallet state is not up to date yet.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
-        current_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        current_light_state: &LightState,
         new_block: &Block,
     ) -> Result<()> {
         let transaction: Transaction = new_block.kernel.body.transaction.clone();
@@ -369,7 +370,11 @@ impl WalletState {
         // a) update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
-        let mut msa_state: MutatorSetAccumulator<Hash> = current_mutator_set_accumulator.clone();
+        let mut msa_state: MutatorSetAccumulator<Hash> = current_light_state
+            .block
+            .body()
+            .mutator_set_accumulator
+            .clone();
 
         let mut removal_records = transaction.kernel.inputs.clone();
         removal_records.reverse();
@@ -433,8 +438,12 @@ impl WalletState {
                         .sum::<Amount>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
-                let new_own_membership_proof =
-                    msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
+                let new_own_membership_proof = msa_state.prove(
+                    utxo_digest,
+                    sender_randomness,
+                    receiver_preimage,
+                    &current_light_state.mutator_set_active_window,
+                );
 
                 // Add the data required to restore the UTXOs membership proof from public
                 // data to the secret's file.
@@ -759,7 +768,6 @@ mod tests {
             .wallet_db
             .monitored_utxos()
             .len();
-        let mut mutator_set_accumulator = genesis_block.kernel.body.mutator_set_accumulator.clone();
         assert!(
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"
@@ -777,9 +785,10 @@ mod tests {
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, other_recipient_address);
+            let light_state = own_global_state.chain.light_state();
             own_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
+                .update_wallet_state_with_new_block(&light_state, &new_block)
                 .await
                 .unwrap();
             own_global_state
@@ -794,10 +803,9 @@ mod tests {
             own_global_state
                 .chain
                 .light_state_mut()
-                .set_block(new_block.clone());
+                .update_with_block(&new_block);
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
         assert!(
             own_global_state
@@ -827,9 +835,10 @@ mod tests {
                 UtxoNotifier::OwnMiner,
             )
             .unwrap();
+        let light_state = own_global_state.chain.light_state();
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3a)
+            .update_wallet_state_with_new_block(&light_state, &block_3a)
             .await
             .unwrap();
         own_global_state
@@ -844,7 +853,7 @@ mod tests {
         own_global_state
             .chain
             .light_state_mut()
-            .set_block(block_3a.clone());
+            .update_with_block(&block_3a);
 
         assert!(
             own_global_state
@@ -874,9 +883,10 @@ mod tests {
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
             make_mock_block(&latest_block, None, other_recipient_address);
+        let own_light_state = own_global_state.chain.light_state();
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3b)
+            .update_wallet_state_with_new_block(&own_light_state, &block_3b)
             .await
             .unwrap();
         own_global_state
@@ -891,7 +901,7 @@ mod tests {
         own_global_state
             .chain
             .light_state_mut()
-            .set_block(block_3b.clone());
+            .update_with_block(&block_3b);
 
         assert!(
             own_global_state
@@ -916,13 +926,13 @@ mod tests {
 
         // Mine nine blocks on top of 3b, update states
         latest_block = block_3b;
-        mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, other_recipient_address);
+            let own_light_state_ = own_global_state.chain.light_state();
             own_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
+                .update_wallet_state_with_new_block(&own_light_state_, &new_block)
                 .await
                 .unwrap();
             own_global_state
@@ -937,10 +947,9 @@ mod tests {
             own_global_state
                 .chain
                 .light_state_mut()
-                .set_block(new_block.clone());
+                .update_with_block(&new_block);
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
 
         let prune_count_11 = own_global_state
@@ -965,9 +974,10 @@ mod tests {
 
         // Mine *one* more block. Verify that MUTXO is pruned
         let (block_12, _, _) = make_mock_block(&latest_block, None, other_recipient_address);
+        let own_light_state__ = own_global_state.chain.light_state();
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_12)
+            .update_wallet_state_with_new_block(&own_light_state__, &block_12)
             .await
             .unwrap();
         own_global_state
@@ -982,7 +992,7 @@ mod tests {
         own_global_state
             .chain
             .light_state_mut()
-            .set_block(block_12.clone());
+            .update_with_block(&block_12);
 
         assert!(
             own_global_state

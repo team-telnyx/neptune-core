@@ -544,6 +544,7 @@ mod ms_proof_tests {
 
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
     use crate::util_types::test_shared::mutator_set::{
         empty_rusty_mutator_set, make_item_and_randomnesses, random_mutator_set_membership_proof,
     };
@@ -629,13 +630,17 @@ mod ms_proof_tests {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
         type H = Tip5;
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+        let active_window_chunks = ChunkDictionary::empty_active_window_chunks();
         for _ in 0..10 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let mp = accumulator
-                .kernel
-                .prove(item, sender_randomness, receiver_preimage);
+            let mp = accumulator.kernel.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &active_window_chunks,
+            );
 
             let json: String = serde_json::to_string(&mp).unwrap();
             let mp_again = serde_json::from_str::<MsMembershipProof<H>>(&json).unwrap();
@@ -673,8 +678,12 @@ mod ms_proof_tests {
                     .expect("Could not update membership proof from addition.");
             }
 
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &archival_mutator_set.active_window_chunks(),
+            );
             if i == own_index {
                 own_membership_proof = Some(membership_proof);
                 own_item = Some(item);
@@ -801,7 +810,12 @@ mod ms_proof_tests {
                 &addition_record,
             )
             .unwrap();
-            mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+            mps.push(ams.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &ams.active_window_chunks(),
+            ));
             items.push(item);
             ams.add(&addition_record);
             addition_records.push(addition_record);
@@ -885,7 +899,12 @@ mod ms_proof_tests {
                     &addition_record,
                 )
                 .unwrap();
-                mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+                mps.push(ams.prove(
+                    item,
+                    sender_randomness,
+                    receiver_preimage,
+                    &ams.active_window_chunks(),
+                ));
                 items.push(item);
                 ams.add(&addition_record);
                 addition_records.push(addition_record);
@@ -916,6 +935,11 @@ mod ms_proof_tests {
         type H = Tip5;
 
         let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
 
         let mut rng = thread_rng();
         for _ in 0..10 {
@@ -942,8 +966,23 @@ mod ms_proof_tests {
                 own_sender_randomness,
                 own_receiver_preimage.hash::<H>(),
             );
-            let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage);
-            msa.add(&own_addition_record);
+            let mut own_mp = msa.prove(
+                own_item,
+                own_sender_randomness,
+                own_receiver_preimage,
+                &all_chunks,
+            );
+            if let Some((_new_index, (_new_mmr_mp, new_chunk))) = msa.add(&own_addition_record) {
+                let new_chunk_digest = H::hash(&new_chunk);
+                for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                    mmr_mp.update_from_append(
+                        swbf.count_leaves(),
+                        new_chunk_digest,
+                        &swbf.get_peaks(),
+                    );
+                }
+                swbf.append(new_chunk_digest);
+            }
             let msa_after_own_add = msa.clone();
 
             // Apply 1st batch of additions
@@ -956,7 +995,17 @@ mod ms_proof_tests {
                 own_mp
                     .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
-                msa.add(&addition_record);
+                if let Some((_new_index, (_new_mmr_mp, new_chunk))) = msa.add(&addition_record) {
+                    let new_chunk_digest = H::hash(&new_chunk);
+                    for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                        mmr_mp.update_from_append(
+                            swbf.count_leaves(),
+                            new_chunk_digest,
+                            &swbf.get_peaks(),
+                        );
+                    }
+                    swbf.append(new_chunk_digest);
+                }
                 assert!(
                     msa.verify(own_item, &own_mp),
                     "Own mp must be valid after update"
@@ -1018,8 +1067,12 @@ mod ms_proof_tests {
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             addition_records.push(addition_record);
 
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &archival_mutator_set.active_window_chunks(),
+            );
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -1136,8 +1189,12 @@ mod ms_proof_tests {
                     commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
 
                 // record membership proof
-                let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                let membership_proof = archival_mutator_set.prove(
+                    item,
+                    sender_randomness,
+                    receiver_preimage,
+                    &archival_mutator_set.active_window_chunks(),
+                );
 
                 // update existing membership proof
                 for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {

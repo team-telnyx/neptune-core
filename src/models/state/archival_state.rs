@@ -1,5 +1,4 @@
 use crate::prelude::twenty_first;
-
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
@@ -935,17 +934,10 @@ mod archival_state_tests {
                 .update_mutator_set(&mock_block_1)
                 .await
                 .unwrap();
-            let msa = genesis_receiver_global_state
-                .chain
-                .archival_state_mut()
-                .genesis_block
-                .kernel
-                .body
-                .mutator_set_accumulator
-                .clone();
+            let light_state = genesis_receiver_global_state.chain.light_state();
             genesis_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&msa, &mock_block_1)
+                .update_wallet_state_with_new_block(&light_state, &mock_block_1)
                 .await
                 .unwrap();
 
@@ -1232,7 +1224,7 @@ mod archival_state_tests {
                 global_state
                     .chain
                     .light_state_mut()
-                    .set_block(next_block.clone());
+                    .update_with_block(&next_block);
 
                 // 2. Update mutator set with produced block
                 global_state
@@ -1243,12 +1235,10 @@ mod archival_state_tests {
                     .unwrap();
 
                 // 3. Update wallet state so we can continue making transactions
+                let light_state = global_state.chain.light_state();
                 global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(
-                        &previous_block.kernel.body.mutator_set_accumulator,
-                        &next_block,
-                    )
+                    .update_wallet_state_with_new_block(&light_state, &next_block)
                     .await
                     .unwrap();
             }
@@ -1483,12 +1473,10 @@ mod archival_state_tests {
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
+            let light_state = genesis_state.chain.light_state();
             genesis_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                    &block_1,
-                )
+                .update_wallet_state_with_new_block(&light_state, &block_1)
                 .await
                 .unwrap();
             assert_eq!(
@@ -1515,12 +1503,10 @@ mod archival_state_tests {
                     )
                     .unwrap();
             }
+            let light_state = alice_state.chain.light_state();
             alice_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                    &block_1,
-                )
+                .update_wallet_state_with_new_block(&light_state, &block_1)
                 .await
                 .unwrap();
         }
@@ -1539,12 +1525,10 @@ mod archival_state_tests {
                     )
                     .unwrap();
             }
+            let light_state = bob_state.chain.light_state();
             bob_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                    &block_1,
-                )
+                .update_wallet_state_with_new_block(&light_state, &block_1)
                 .await
                 .unwrap();
         }
@@ -1674,24 +1658,21 @@ mod archival_state_tests {
         }
 
         // Update wallets and verify that Alice and Bob's balances are zero
+
+        let alice_light_state = alice_state_lock.lock_guard().await.chain.light_state();
         alice_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2,
-            )
+            .update_wallet_state_with_new_block(&alice_light_state, &block_2)
             .await
             .unwrap();
+        let bob_light_state = bob_state_lock.lock_guard().await.chain.light_state();
         bob_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2,
-            )
+            .update_wallet_state_with_new_block(&bob_light_state, &block_2)
             .await
             .unwrap();
         assert!(alice_state_lock
@@ -1750,14 +1731,12 @@ mod archival_state_tests {
                 UtxoNotifier::Cli,
             )
             .unwrap();
+        let genesis_light_state = genesis_state_lock.lock_guard().await.chain.light_state();
         genesis_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2,
-            )
+            .update_wallet_state_with_new_block(&genesis_light_state, &block_2)
             .await
             .unwrap();
 

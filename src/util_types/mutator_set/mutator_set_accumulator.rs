@@ -2,6 +2,7 @@ use crate::prelude::twenty_first;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -9,6 +10,9 @@ use twenty_first::util_types::{
     algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
 };
 
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
+use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 use super::{
     addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
     mutator_set_kernel::MutatorSetKernel, mutator_set_trait::MutatorSet,
@@ -22,9 +26,14 @@ pub struct MutatorSetAccumulator<H: AlgebraicHasher + BFieldCodec> {
 
 impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
     pub fn new() -> Self {
+        let num_chunks_in_active_window = WINDOW_SIZE as u32 / CHUNK_SIZE;
+        let empty_chunk_digest = H::hash(&Chunk::empty_chunk());
         let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
-            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
+            swbf_inactive: MmrAccumulator::<H>::new(vec![
+                empty_chunk_digest;
+                num_chunks_in_active_window as usize
+            ]),
             swbf_active: SwbfSuffix::new(),
         };
 
@@ -33,18 +42,9 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
         }
     }
 }
-
 impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
     fn default() -> Self {
-        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
-            aocl: MmrAccumulator::<H>::new(vec![]),
-            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
-            swbf_active: SwbfSuffix::new(),
-        };
-
-        Self {
-            kernel: set_commitment,
-        }
+        Self::new()
     }
 }
 
@@ -54,9 +54,14 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
+        active_window_chunks: &ChunkDictionary<H>,
     ) -> MsMembershipProof<H> {
-        self.kernel
-            .prove(item, sender_randomness, receiver_preimage)
+        self.kernel.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            active_window_chunks,
+        )
     }
 
     fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -67,8 +72,11 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
         self.kernel.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord) {
-        self.kernel.add_helper(addition_record);
+    fn add(
+        &mut self,
+        addition_record: &AdditionRecord,
+    ) -> Option<(u64, (MmrMembershipProof<H>, Chunk))> {
+        self.kernel.add(addition_record)
     }
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
@@ -112,9 +120,10 @@ mod ms_accumulator_tests {
     fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items: Vec<Digest> = vec![];
+        let all_chunks = ChunkDictionary::empty_active_window_chunks();
 
         // Add N elements to the MS
         let num_additions = 44;
@@ -123,7 +132,8 @@ mod ms_accumulator_tests {
 
             let addition_record =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof =
+                accumulator.prove(item, sender_randomness, receiver_preimage, &all_chunks);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -184,7 +194,7 @@ mod ms_accumulator_tests {
         // lot of code duplication that is avoided by doing that.
         type H = Tip5;
 
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
         let mut rms_after = empty_rusty_mutator_set::<H>();
         let archival_after_remove = rms_after.ams_mut();
         let mut rms_before = empty_rusty_mutator_set::<H>();
@@ -225,8 +235,12 @@ mod ms_accumulator_tests {
 
                     let addition_record: AdditionRecord =
                         commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-                    let membership_proof_acc =
-                        accumulator.prove(item, sender_randomness, receiver_preimage);
+                    let membership_proof_acc = accumulator.prove(
+                        item,
+                        sender_randomness,
+                        receiver_preimage,
+                        &archival_after_remove.active_window_chunks(),
+                    );
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch

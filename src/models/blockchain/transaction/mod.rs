@@ -489,6 +489,13 @@ impl Transaction {
 
         true
     }
+
+    pub fn empty_transaction() -> Self {
+        Self {
+            kernel: TransactionKernel::empty_kernel(),
+            witness: Witness::Faith,
+        }
+    }
 }
 
 #[cfg(test)]

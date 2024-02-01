@@ -165,7 +165,7 @@ impl NeptuneRPCServer {
 
         match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
-                let tip_block_header = state.chain.light_state().header();
+                let tip_block_header = state.chain.light_state().block.header();
 
                 assert!(tip_block_header.height >= latest_balance_height);
 
@@ -204,6 +204,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .chain
             .light_state()
+            .block
             .kernel
             .header
             .height
@@ -214,13 +215,19 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn tip_digest(self, _: context::Context) -> Digest {
-        self.state.lock_guard().await.chain.light_state().hash()
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .block
+            .hash()
     }
 
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let state = self.state.lock_guard().await;
 
-        let latest_block_digest = state.chain.light_state().hash();
+        let latest_block_digest = state.chain.light_state().block.hash();
 
         state
             .chain
@@ -339,6 +346,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .chain
             .light_state()
+            .block
             .kernel
             .header
             .clone()
@@ -401,7 +409,7 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
         let state = self.state.lock_guard().await;
-        let tip_header = state.chain.light_state().header().clone();
+        let tip_header = state.chain.light_state().block.header().clone();
         let wallet_status = state.get_wallet_status_for_tip().await;
         let syncing = state.net.syncing;
         let mempool_size = state.mempool.get_size();
@@ -487,7 +495,7 @@ impl RPC for NeptuneRPCServer {
         let utxo = Utxo::new(address.lock_script(), coins);
 
         let state = self.state.lock_guard().await;
-        let block_height = state.chain.light_state().header().height;
+        let block_height = state.chain.light_state().block.header().height;
         let receiver_privacy_digest = address.privacy_digest;
         let sender_randomness = state
             .wallet_state

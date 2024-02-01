@@ -94,13 +94,13 @@ impl Block {
     }
 
     #[inline]
-    pub fn header(&self) -> &BlockHeader {
-        &self.kernel.header
+    pub fn header(&self) -> BlockHeader {
+        self.kernel.header.clone()
     }
 
     #[inline]
-    pub fn body(&self) -> &BlockBody {
-        &self.kernel.body
+    pub fn body(&self) -> BlockBody {
+        self.kernel.body.clone()
     }
 
     #[inline]
@@ -119,8 +119,15 @@ impl Block {
         reward
     }
 
+    pub fn empty_block() -> Self {
+        Self {
+            kernel: BlockKernel::empty_kernel(),
+            proof: None,
+        }
+    }
+
     pub fn genesis_block() -> Self {
-        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::new();
         let mut ms_update = MutatorSetUpdate::default();
 
         let premine_distribution = Self::premine_distribution();

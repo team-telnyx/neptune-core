@@ -141,6 +141,20 @@ pub fn pseudorandom_transaction_kernel(
     }
 }
 
+impl TransactionKernel {
+    pub fn empty_kernel() -> Self {
+        Self {
+            inputs: vec![],
+            outputs: vec![],
+            public_announcements: vec![],
+            fee: 0.into(),
+            coinbase: None,
+            timestamp: BFieldElement::new(0),
+            mutator_set_hash: Digest::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod transaction_kernel_tests {
 

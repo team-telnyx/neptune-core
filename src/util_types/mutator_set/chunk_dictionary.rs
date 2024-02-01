@@ -7,10 +7,13 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
+use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -23,6 +26,32 @@ pub struct ChunkDictionary<H: AlgebraicHasher> {
 
 impl<H: AlgebraicHasher> ChunkDictionary<H> {
     pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>) -> Self {
+        Self { dictionary }
+    }
+
+    pub fn filter_by_chunk_index<Closure: Fn(u64) -> bool>(&self, closure: Closure) -> Self {
+        Self {
+            dictionary: self
+                .dictionary
+                .iter()
+                .filter(|(chunk_index, (_mmrmp, _ch))| closure(**chunk_index))
+                .map(|(chunk_index, (mmrmp, chunk))| (*chunk_index, (mmrmp.clone(), chunk.clone())))
+                .collect(),
+        }
+    }
+
+    /// Produce a ChunksDictionary object containing all chunks (with membership proofs)
+    /// in the active window for an empty mutator set.
+    pub fn empty_active_window_chunks() -> Self {
+        let empty_chunk = Chunk::empty_chunk();
+        let empty_digest = H::hash(&empty_chunk);
+        let num_chunks = WINDOW_SIZE as u32 / CHUNK_SIZE;
+        let mut mmra = MmrAccumulator::new(vec![]);
+        let mut dictionary = HashMap::<u64, (MmrMembershipProof<H>, Chunk)>::new();
+        for i in 0..num_chunks {
+            let mmr_mp = mmra.append(empty_digest);
+            dictionary.insert(i as u64, (mmr_mp, empty_chunk.clone()));
+        }
         Self { dictionary }
     }
 }

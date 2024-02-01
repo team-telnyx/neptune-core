@@ -123,7 +123,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let syncing = false;
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
-    let light_state: LightState = LightState::from(latest_block.clone());
+    let mut light_state = LightState::after_genesis();
+    light_state.update_with_block(&latest_block);
     let blockchain_archival_state = BlockchainArchivalState {
         light_state,
         archival_state,

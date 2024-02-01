@@ -323,20 +323,25 @@ mod removal_record_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
-    use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+    use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;
 
     fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof<H> =
-            accumulator.prove(item, sender_randomness, receiver_preimage);
+        let mp: MsMembershipProof<H> = accumulator.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            &ChunkDictionary::empty_active_window_chunks(),
+        );
         let removal_record: RemovalRecord<H> = accumulator.drop(item, &mp);
         (item, mp, removal_record)
     }
@@ -432,16 +437,22 @@ mod removal_record_tests {
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
             commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+        let mp = accumulator.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            &ChunkDictionary::empty_active_window_chunks(),
+        );
 
         assert!(
             !accumulator.verify(item, &mp),
             "Item must fail to verify before it is added"
         );
+        println!("----");
         accumulator.add(&addition_record);
         let rr = accumulator.drop(item, &mp);
         assert!(
@@ -462,7 +473,12 @@ mod removal_record_tests {
 
         let test_iterations = 10;
         for _ in 0..test_iterations {
-            let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+            let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+            let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+            let mut swbf = MmrAccumulator::<H>::new(vec![
+                H::hash(&Chunk::empty_chunk());
+                WINDOW_SIZE / CHUNK_SIZE as usize
+            ]);
             let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
             let mut items = vec![];
             let mut mps = vec![];
@@ -471,7 +487,7 @@ mod removal_record_tests {
 
                 let addition_record: AdditionRecord =
                     commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-                let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+                let mp = accumulator.prove(item, sender_randomness, receiver_preimage, &all_chunks);
 
                 // Update all removal records from addition, then add the element
                 let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -497,7 +513,19 @@ mod removal_record_tests {
                     "batch update must return OK, i = {}",
                     i
                 );
-                accumulator.add(&addition_record);
+                if let Some((_new_index, (_new_mmr_mp, new_chunk))) =
+                    accumulator.add(&addition_record)
+                {
+                    let new_chunk_digest = H::hash(&new_chunk);
+                    for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                        mmr_mp.update_from_append(
+                            swbf.count_leaves(),
+                            new_chunk_digest,
+                            &swbf.get_peaks(),
+                        );
+                    }
+                    swbf.append(new_chunk_digest);
+                }
                 mps.push(mp.clone());
                 items.push(item);
 
@@ -549,7 +577,12 @@ mod removal_record_tests {
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
         let mut original_first_removal_record = None;
@@ -560,7 +593,7 @@ mod removal_record_tests {
 
             let addition_record: AdditionRecord =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage, &all_chunks);
 
             // Update all removal records from addition, then add the element
             let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -586,7 +619,18 @@ mod removal_record_tests {
                 "batch update must return OK, i = {}",
                 i
             );
-            accumulator.add(&addition_record);
+            if let Some((_new_index, (_new_mmr_mp, new_chunk))) = accumulator.add(&addition_record)
+            {
+                let new_chunk_digest = H::hash(&new_chunk);
+                for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                    mmr_mp.update_from_append(
+                        swbf.count_leaves(),
+                        new_chunk_digest,
+                        &swbf.get_peaks(),
+                    );
+                }
+                swbf.append(new_chunk_digest);
+            }
             mps.push(mp.clone());
             items.push(item);
 

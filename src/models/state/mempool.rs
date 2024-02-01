@@ -538,6 +538,7 @@ mod tests {
             get_mock_global_state(Network::Alpha, 2, None).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
+        let premine_receiver_light_state = premine_receiver_global_state.chain.light_state();
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
@@ -556,15 +557,13 @@ mod tests {
         // Update both states with block 1
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
+            .update_wallet_state_with_new_block(&premine_receiver_light_state, &block_1)
             .await?;
         premine_receiver_global_state
             .chain
             .light_state_mut()
-            .set_block(block_1.clone());
+            .update_with_block(&block_1);
+        let other_light_state = other_global_state.chain.light_state();
         other_global_state
             .wallet_state
             .expected_utxos
@@ -577,15 +576,12 @@ mod tests {
             .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
+            .update_wallet_state_with_new_block(&other_light_state, &block_1)
             .await?;
         other_global_state
             .chain
             .light_state_mut()
-            .set_block(block_1.clone());
+            .update_with_block(&block_1);
 
         // Create a transaction that's valid to be included in block 2
         let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];

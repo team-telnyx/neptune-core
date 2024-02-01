@@ -1,9 +1,12 @@
 use crate::prelude::twenty_first;
 
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::addition_record::AdditionRecord;
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::RemovalRecord;
 
@@ -27,6 +30,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
+        active_window_chunks: &ChunkDictionary<H>,
     ) -> MsMembershipProof<H>;
 
     fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool;
@@ -34,8 +38,12 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     /// Generates a removal record with which to update the set commitment.
     fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
 
-    /// Updates the set-commitment with an addition record.
-    fn add(&mut self, addition_record: &AdditionRecord);
+    /// Updates the set-commitment with an addition record. If the window slides, return
+    /// the new chunk (along with index and MMR membership proof); otherwise return None.
+    fn add(
+        &mut self,
+        addition_record: &AdditionRecord,
+    ) -> Option<(u64, (MmrMembershipProof<H>, Chunk))>;
 
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record.

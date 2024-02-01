@@ -403,6 +403,7 @@ impl PeerLoopHandler {
                     .await
                     .chain
                     .light_state()
+                    .block
                     .kernel
                     .header
                     .proof_of_work_family
@@ -451,7 +452,7 @@ impl PeerLoopHandler {
 
                         let global_state = self.global_state_lock.lock_guard().await;
 
-                        let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                        let tip_digest = global_state.chain.light_state().block.kernel.mast_hash();
 
                         if global_state
                             .chain
@@ -500,7 +501,7 @@ impl PeerLoopHandler {
                         / 2,
                 );
                 let global_state = self.global_state_lock.lock_guard().await;
-                let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                let tip_digest = global_state.chain.light_state().block.kernel.mast_hash();
 
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
@@ -625,6 +626,7 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
+                        .block
                         .kernel
                         .header)
                         .into(),
@@ -646,6 +648,7 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
+                        .block
                         .kernel
                         .header
                         .proof_of_work_family
@@ -718,7 +721,7 @@ impl PeerLoopHandler {
                 let mut canonical_chain_block_digest = block_digests[0];
                 if block_digests.len() > 1 {
                     let global_state = self.global_state_lock.lock_guard().await;
-                    let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                    let tip_digest = global_state.chain.light_state().block.kernel.mast_hash();
                     for block_digest in block_digests {
                         if global_state
                             .chain
@@ -789,6 +792,7 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
+                        .block
                         .kernel
                         .body
                         .mutator_set_accumulator,
@@ -840,6 +844,7 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
+                        .block
                         .hash(),
                 };
                 self.to_main_tx
@@ -1152,6 +1157,7 @@ impl PeerLoopHandler {
                 .await
                 .chain
                 .light_state()
+                .block
                 .kernel
                 .header
                 .proof_of_work_family

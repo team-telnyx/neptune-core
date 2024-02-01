@@ -69,3 +69,15 @@ impl MastHash for BlockBody {
         ]
     }
 }
+
+impl BlockBody {
+    pub fn empty_body() -> Self {
+        Self {
+            transaction: Transaction::empty_transaction(),
+            mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
+            lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+            block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+            uncle_blocks: vec![],
+        }
+    }
+}

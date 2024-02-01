@@ -2,6 +2,9 @@ use crate::prelude::twenty_first;
 
 use crate::models::consensus::mast_hash::HasDiscriminant;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::Hash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -112,6 +115,28 @@ impl MastHash for BlockHeader {
             self.difficulty.encode(),
             self.block_body_merkle_root.encode(),
         ]
+    }
+}
+
+impl BlockHeader {
+    pub fn empty_header() -> BlockHeader {
+        Self {
+            version: BFieldElement::new(0),
+            height: 0.into(),
+            mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+            prev_block_digest: Digest::default(),
+            timestamp: BFieldElement::new(0),
+            nonce: [
+                BFieldElement::new(0),
+                BFieldElement::new(0),
+                BFieldElement::new(0),
+            ],
+            max_block_size: 0,
+            proof_of_work_line: 0.into(),
+            proof_of_work_family: 0.into(),
+            difficulty: 0.into(),
+            block_body_merkle_root: Digest::default(),
+        }
     }
 }
 

@@ -38,11 +38,13 @@ pub enum MutatorSetKernelError {
     MutatorSetIsEmpty,
 }
 
+const SUFFIX_SIZE: usize = 0;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub struct MutatorSetKernel<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
-    pub swbf_active: SwbfSuffix<H, WINDOW_SIZE>,
+    pub swbf_active: SwbfSuffix<H, SUFFIX_SIZE>,
 }
 
 // FIXME: Apply over-sampling to circumvent risk of duplicates.
@@ -123,11 +125,12 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
     }
 
-    /// Helper function. Like `add` but also returns the chunk that
-    /// was added to the inactive SWBF if the window slid (and None
-    /// otherwise) since this is needed by the archival version of
-    /// the mutator set.
-    pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
+    /// Append the item to the AOCL and, if the window slides, return the new chunk of the
+    /// SWBF along with its membership proof.
+    pub fn add(
+        &mut self,
+        addition_record: &AdditionRecord,
+    ) -> Option<(u64, (MmrMembershipProof<H>, Chunk))> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
@@ -144,20 +147,16 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
-        let chunk: Chunk = self.swbf_active.slid_chunk();
+        let chunk: Chunk = Chunk {
+            relative_indices: vec![],
+        };
         let chunk_digest: Digest = H::hash(&chunk);
-        self.swbf_inactive.append(chunk_digest); // ignore auth path
-
-        // Then move window to the right, equivalent to moving values
-        // inside window to the left.
-        self.swbf_active.slide_window();
+        let mmr_mp = self.swbf_inactive.append(chunk_digest);
 
         let chunk_index_for_inserted_chunk = self.swbf_inactive.count_leaves() - 1;
 
-        // Return the chunk that was added to the inactive part of the SWBF.
-        // This chunk is needed by the Archival mutator set. The Regular
-        // mutator set can ignore it.
-        Some((chunk_index_for_inserted_chunk, chunk))
+        // Return the chunk and MMR membership proof that was added to the SWBF.
+        Some((chunk_index_for_inserted_chunk, (mmr_mp, chunk)))
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
@@ -231,13 +230,30 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
+        active_window_chunks: &ChunkDictionary<H>,
     ) -> MsMembershipProof<H> {
         // compute commitment
         let item_commitment = H::hash_pair(item, sender_randomness);
 
         // simulate adding to commitment list
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
-        let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
+
+        // Get all bloom filter indices
+        let all_indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            auth_path_aocl.leaf_index,
+        ));
+        let mut all_chunk_indices = all_indices
+            .to_array()
+            .into_iter()
+            .map(|idx| (idx / CHUNK_SIZE as u128) as u64)
+            .collect_vec();
+        all_chunk_indices.sort();
+        all_chunk_indices.dedup();
+        let target_chunks = active_window_chunks
+            .filter_by_chunk_index(|chunk_idx| all_chunk_indices.contains(&chunk_idx));
 
         // return membership proof
         MsMembershipProof {
@@ -248,12 +264,18 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
     }
 
+    /// Verify that an item belongs to the mutator set, given the item's membership proof.
     pub fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
         if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
+            println!(
+                "leaf index too large: {} versus {}",
+                self.aocl.count_leaves(),
+                membership_proof.auth_path_aocl.leaf_index
+            );
             return false;
         }
 
@@ -271,6 +293,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
             self.aocl.count_leaves(),
         );
         if !is_aocl_member {
+            println!("item not aocl member");
             return false;
         }
 
@@ -282,6 +305,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         // prepare parameters of inactive part
         let current_batch_index: u64 = self.get_batch_index();
         let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
+        let suffix_start = window_start + WINDOW_SIZE as u128 - SUFFIX_SIZE as u128;
 
         // Get all bloom filter indices
         let all_indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
@@ -293,7 +317,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         let chunkidx_to_indices_dict = indices_to_hash_map(&all_indices.to_array());
         'outer: for (chunk_index, indices) in chunkidx_to_indices_dict.into_iter() {
-            if chunk_index < current_batch_index {
+            if chunk_index < (suffix_start / BATCH_SIZE as u128) as u64 {
                 // verify mmr auth path
                 if !membership_proof
                     .target_chunks
@@ -335,6 +359,18 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
                     }
                 }
             }
+        }
+
+        if !entries_in_dictionary {
+            println!("entries not in dictionary");
+        }
+
+        if !all_auth_paths_are_valid {
+            println!("not all auth paths are valid");
+        }
+
+        if !has_absent_index {
+            println!("rr does not have absent index");
         }
 
         // return verdict
@@ -576,7 +612,7 @@ mod accumulation_scheme_tests {
     fn get_batch_index_test() {
         // Verify that the method to get batch index returns sane results
         type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
         assert_eq!(
             0,
             mutator_set.kernel.get_batch_index(),
@@ -610,11 +646,11 @@ mod accumulation_scheme_tests {
     fn mutator_set_hash_test() {
         type H = Tip5;
 
-        let empty_set = MutatorSetAccumulator::<H>::default();
+        let empty_set = MutatorSetAccumulator::<H>::new();
         let empty_hash = empty_set.hash();
 
         // Add one element to append-only commitment list
-        let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
+        let mut set_with_aocl_append = MutatorSetAccumulator::<H>::new();
 
         let (item0, _sender_randomness, _receiver_preimage) = make_item_and_randomnesses();
 
@@ -627,7 +663,7 @@ mod accumulation_scheme_tests {
         );
 
         // Manipulate inactive SWBF
-        let mut set_with_swbf_inactive_append = MutatorSetAccumulator::<H>::default();
+        let mut set_with_swbf_inactive_append = MutatorSetAccumulator::<H>::new();
         set_with_swbf_inactive_append
             .kernel
             .swbf_inactive
@@ -707,7 +743,7 @@ mod accumulation_scheme_tests {
     fn init_test() {
         type H = Tip5;
 
-        let accumulator = MutatorSetAccumulator::<H>::default();
+        let accumulator = MutatorSetAccumulator::<H>::new();
         let mut rms = empty_rusty_mutator_set::<H>();
         let archival = rms.ams_mut();
 
@@ -729,17 +765,24 @@ mod accumulation_scheme_tests {
         // Ensure that `verify` does not crash when given a membership proof
         // that represents a future addition to the AOCL.
         type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default().kernel;
-        let empty_mutator_set = MutatorSetAccumulator::<H>::default().kernel;
+        let mut mutator_set = MutatorSetAccumulator::<H>::new().kernel;
+        let empty_mutator_set = MutatorSetAccumulator::<H>::new().kernel;
+        let mut active_window_chunks = ChunkDictionary::default();
 
         for _ in 0..2 * BATCH_SIZE + 2 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof: MsMembershipProof<H> =
-                mutator_set.prove(item, sender_randomness, receiver_preimage);
-            mutator_set.add_helper(&addition_record);
+            let membership_proof: MsMembershipProof<H> = mutator_set.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &active_window_chunks,
+            );
+            if let Some((index, (mmr_mp, ch))) = mutator_set.add(&addition_record) {
+                active_window_chunks.dictionary.insert(index, (mmr_mp, ch));
+            }
             assert!(mutator_set.verify(item, &membership_proof));
 
             // Verify that a future membership proof returns false and does not crash
@@ -751,14 +794,19 @@ mod accumulation_scheme_tests {
     fn test_membership_proof_update_from_add() {
         type H = Tip5;
 
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
+        let active_window_chunks = ChunkDictionary::empty_active_window_chunks();
         let (own_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
         let addition_record =
             commit::<H>(own_item, sender_randomness, receiver_preimage.hash::<H>());
-        let mut membership_proof =
-            mutator_set.prove(own_item, sender_randomness, receiver_preimage);
-        mutator_set.kernel.add_helper(&addition_record);
+        let mut membership_proof = mutator_set.prove(
+            own_item,
+            sender_randomness,
+            receiver_preimage,
+            &active_window_chunks,
+        );
+        mutator_set.kernel.add(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
         let (new_item, new_sender_randomness, new_receiver_preimage) = make_item_and_randomnesses();
@@ -795,7 +843,7 @@ mod accumulation_scheme_tests {
 
         // Insert the new element into the mutator set, then verify that the membership proof works and
         // that the original membership proof is invalid.
-        mutator_set.kernel.add_helper(&new_addition_record);
+        mutator_set.kernel.add(&new_addition_record);
         assert!(
             !mutator_set.verify(own_item, &original_membership_proof),
             "Original membership proof must fail to verify after addition"
@@ -811,7 +859,12 @@ mod accumulation_scheme_tests {
         type H = Tip5;
         let mut rng = thread_rng();
 
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
 
         let num_additions = rng.gen_range(0..=100i32);
         println!(
@@ -827,7 +880,8 @@ mod accumulation_scheme_tests {
 
             let addition_record =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof =
+                mutator_set.prove(item, sender_randomness, receiver_preimage, &all_chunks);
 
             // Update all membership proofs
             for (mp, itm) in membership_proofs_and_items.iter_mut() {
@@ -841,7 +895,19 @@ mod accumulation_scheme_tests {
 
             // Add the element
             assert!(!mutator_set.verify(item, &membership_proof));
-            mutator_set.kernel.add_helper(&addition_record);
+            if let Some((_new_index, (_new_mmr_mp, new_chunk))) =
+                mutator_set.kernel.add(&addition_record)
+            {
+                for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                    let new_chunk_digest = H::hash(&new_chunk);
+                    mmr_mp.update_from_append(
+                        swbf.count_leaves(),
+                        new_chunk_digest,
+                        &swbf.get_peaks(),
+                    );
+                    swbf.append(new_chunk_digest);
+                }
+            }
             assert!(mutator_set.verify(item, &membership_proof));
             membership_proofs_and_items.push((membership_proof, item));
 
@@ -857,26 +923,46 @@ mod accumulation_scheme_tests {
     fn test_add_and_prove() {
         type H = Tip5;
 
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
         let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
 
         let addition_record =
             commit::<H>(item0, sender_randomness0, receiver_preimage0.hash::<H>());
-        let membership_proof = mutator_set.prove(item0, sender_randomness0, receiver_preimage0);
+        let membership_proof =
+            mutator_set.prove(item0, sender_randomness0, receiver_preimage0, &all_chunks);
 
         assert!(!mutator_set.verify(item0, &membership_proof));
 
-        mutator_set.kernel.add_helper(&addition_record);
+        if let Some((_new_index, (_new_mmr_mp, new_chunk))) =
+            mutator_set.kernel.add(&addition_record)
+        {
+            for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                let new_chunk_digest = H::hash(&new_chunk);
+                mmr_mp.update_from_append(swbf.count_leaves(), new_chunk_digest, &swbf.get_peaks());
+                swbf.append(new_chunk_digest);
+            }
+        }
 
         assert!(mutator_set.verify(item0, &membership_proof));
 
         // Insert a new item and verify that this still works
         let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
         let new_ar = commit::<H>(item1, sender_randomness1, receiver_preimage1.hash::<H>());
-        let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1);
+        let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1, &all_chunks);
         assert!(!mutator_set.verify(item1, &new_mp));
 
-        mutator_set.kernel.add_helper(&new_ar);
+        if let Some((_new_index, (_new_mmr_mp, new_chunk))) = mutator_set.kernel.add(&new_ar) {
+            let new_chunk_digest = H::hash(&new_chunk);
+            for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                mmr_mp.update_from_append(swbf.count_leaves(), new_chunk_digest, &swbf.get_peaks());
+            }
+            swbf.append(new_chunk_digest);
+        }
         assert!(mutator_set.verify(item1, &new_mp));
 
         // Insert ~2*BATCH_SIZE  more elements and
@@ -886,10 +972,22 @@ mod accumulation_scheme_tests {
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let other_ar = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let other_mp = mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let other_mp =
+                mutator_set.prove(item, sender_randomness, receiver_preimage, &all_chunks);
             assert!(!mutator_set.verify(item, &other_mp));
 
-            mutator_set.kernel.add_helper(&other_ar);
+            if let Some((_new_index, (_new_mmr_mp, new_chunk))) = mutator_set.kernel.add(&other_ar)
+            {
+                let new_chunk_digest = H::hash(&new_chunk);
+                for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                    mmr_mp.update_from_append(
+                        swbf.count_leaves(),
+                        new_chunk_digest,
+                        &swbf.get_peaks(),
+                    );
+                }
+                swbf.append(new_chunk_digest);
+            }
             assert!(mutator_set.verify(item, &other_mp));
         }
     }
@@ -897,7 +995,12 @@ mod accumulation_scheme_tests {
     #[test]
     fn batch_update_from_addition_and_removal_test() {
         type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
 
         // It's important to test number of additions around the shifting of the window,
         // i.e. around batch size.
@@ -922,7 +1025,7 @@ mod accumulation_scheme_tests {
                 let addition_record =
                     commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
                 let membership_proof =
-                    mutator_set.prove(new_item, sender_randomness, receiver_preimage);
+                    mutator_set.prove(new_item, sender_randomness, receiver_preimage, &all_chunks);
 
                 // Update *all* membership proofs with newly added item
                 let batch_update_res = MsMembershipProof::<H>::batch_update_from_addition(
@@ -933,7 +1036,19 @@ mod accumulation_scheme_tests {
                 );
                 assert!(batch_update_res.is_ok());
 
-                mutator_set.kernel.add_helper(&addition_record);
+                if let Some((_new_index, (_new_mmr_mp, new_chunk))) =
+                    mutator_set.kernel.add(&addition_record)
+                {
+                    let new_chunk_digest = H::hash(&new_chunk);
+                    for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                        mmr_mp.update_from_append(
+                            swbf.count_leaves(),
+                            new_chunk_digest,
+                            &swbf.get_peaks(),
+                        );
+                    }
+                    swbf.append(new_chunk_digest);
+                }
                 assert!(mutator_set.verify(new_item, &membership_proof));
 
                 for (mp, &item) in membership_proofs.iter().zip(items.iter()) {
@@ -977,7 +1092,12 @@ mod accumulation_scheme_tests {
     fn test_multiple_adds() {
         type H = Tip5;
 
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::new();
+        let mut all_chunks = ChunkDictionary::empty_active_window_chunks();
+        let mut swbf = MmrAccumulator::<H>::new(vec![
+            H::hash(&Chunk::empty_chunk());
+            WINDOW_SIZE / CHUNK_SIZE as usize
+        ]);
 
         let num_additions = 65;
 
@@ -989,7 +1109,7 @@ mod accumulation_scheme_tests {
             let addition_record =
                 commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
             let membership_proof =
-                mutator_set.prove(new_item, sender_randomness, receiver_preimage);
+                mutator_set.prove(new_item, sender_randomness, receiver_preimage, &all_chunks);
 
             // Update *all* membership proofs with newly added item
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
@@ -1003,7 +1123,19 @@ mod accumulation_scheme_tests {
                 assert_eq!(changed_res.unwrap(), original_mp != *mp);
             }
 
-            mutator_set.kernel.add_helper(&addition_record);
+            if let Some((_new_index, (_new_mmr_mp, new_chunk))) =
+                mutator_set.kernel.add(&addition_record)
+            {
+                let new_chunk_digest = H::hash(&new_chunk);
+                for (_index, (mmr_mp, _chunk)) in all_chunks.dictionary.iter_mut() {
+                    mmr_mp.update_from_append(
+                        swbf.count_leaves(),
+                        new_chunk_digest,
+                        &swbf.get_peaks(),
+                    );
+                }
+                swbf.append(new_chunk_digest);
+            }
             assert!(mutator_set.verify(new_item, &membership_proof));
 
             (0..items_and_membership_proofs.len()).for_each(|j| {
@@ -1081,7 +1213,7 @@ mod accumulation_scheme_tests {
         type H = Tip5;
         type Mmr = MmrAccumulator<H>;
         type Ms = MutatorSetKernel<H, Mmr>;
-        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().kernel;
+        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::new().kernel;
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
         println!("json = \n{}", json_empty);
@@ -1091,7 +1223,10 @@ mod accumulation_scheme_tests {
         assert!(s_back.swbf_active.sbf.is_empty());
 
         // Add an item, verify correct serialization
-        let (mp, item) = insert_mock_item(&mut mutator_set);
+        let (mp, item) = insert_mock_item(
+            &mut mutator_set,
+            &ChunkDictionary::empty_active_window_chunks(),
+        );
         let json_one_add = serde_json::to_string(&mutator_set).unwrap();
         println!("json_one_add = \n{}", json_one_add);
         let s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();

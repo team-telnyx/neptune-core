@@ -354,6 +354,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
     use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::state::light_state::LightState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
@@ -406,6 +407,7 @@ mod wallet_tests {
         let genesis_block = Block::genesis_block();
         let mut next_block = genesis_block.clone();
         let other_wallet_secret = WalletSecret::new_random();
+        let mut light_state = LightState::after_genesis();
         let other_receiver_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -414,11 +416,10 @@ mod wallet_tests {
             let (nb, _coinbase_utxo, _sender_randomness) =
                 make_mock_block(&previous_block, None, other_receiver_address);
             next_block = nb;
-            let current_mutator_set_accumulator =
-                previous_block.kernel.body.mutator_set_accumulator.clone();
             wallet_state_premine_recipient
-                .update_wallet_state_with_new_block(&current_mutator_set_accumulator, &next_block)
+                .update_wallet_state_with_new_block(&light_state, &next_block)
                 .await?;
+            light_state.update_with_block(&next_block);
         }
 
         let monitored_utxos = get_monitored_utxos(&wallet_state_premine_recipient).await;
@@ -481,12 +482,11 @@ mod wallet_tests {
             own_wallet_state.expected_utxos.len(),
             "Expected UTXO list must have length 1 before block registration"
         );
+        let mut light_state = LightState::after_genesis();
         own_wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
+            .update_wallet_state_with_new_block(&light_state, &block_1)
             .await?;
+        light_state.update_with_block(&block_1);
         assert_eq!(
             1,
             own_wallet_state.expected_utxos.len(),
@@ -541,17 +541,13 @@ mod wallet_tests {
         }
         // Verify that the membership proof is valid *after* running the updater
         own_wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2,
-            )
+            .update_wallet_state_with_new_block(&light_state, &block_2)
             .await?;
+        light_state.update_with_block(&block_2);
         own_wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2.kernel.body.mutator_set_accumulator,
-                &block_3,
-            )
+            .update_wallet_state_with_new_block(&light_state, &block_3)
             .await?;
+        light_state.update_with_block(&block_3);
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
 
         {
@@ -583,6 +579,7 @@ mod wallet_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
         let genesis_block = Block::genesis_block();
+        let mut light_state = LightState::after_genesis();
         let (block_1, cb_utxo, cb_output_randomness) =
             make_mock_block(&genesis_block, None, own_spending_key.to_address());
         let mining_reward = cb_utxo.get_native_coin_amount();
@@ -598,11 +595,9 @@ mod wallet_tests {
             )
             .unwrap();
         own_wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
+            .update_wallet_state_with_new_block(&light_state, &block_1)
             .await?;
+        light_state.update_with_block(&block_1);
 
         // Verify that the allocater returns a sane amount
         assert_eq!(
@@ -655,11 +650,9 @@ mod wallet_tests {
                 )
                 .unwrap();
             own_wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                    &next_block_prime,
-                )
+                .update_wallet_state_with_new_block(&light_state, &next_block_prime)
                 .await?;
+            light_state.update_with_block(&next_block_prime);
             next_block = next_block_prime;
         }
 
@@ -750,8 +743,9 @@ mod wallet_tests {
         next_block.accumulate_transaction(tx);
 
         own_wallet_state
-            .update_wallet_state_with_new_block(&msa_tip_previous.clone(), &next_block)
+            .update_wallet_state_with_new_block(&light_state, &next_block)
             .await?;
+        light_state.update_with_block(&next_block);
 
         assert_eq!(
             20,
@@ -799,7 +793,6 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
         let receiver_data_12_to_other = UtxoReceiverData {
@@ -862,15 +855,17 @@ mod wallet_tests {
                 )
                 .unwrap();
         }
+        let light_state = premine_receiver_global_state.chain.light_state();
         own_wallet_state
-            .update_wallet_state_with_new_block(&previous_msa, &block_1)
+            .update_wallet_state_with_new_block(&light_state, &block_1)
             .await?;
         add_block(&mut premine_receiver_global_state, block_1.clone())
             .await
             .unwrap();
+        let premine_receiver_light_state = premine_receiver_global_state.chain.light_state();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&previous_msa, &block_1)
+            .update_wallet_state_with_new_block(&premine_receiver_light_state, &block_1)
             .await?;
         assert_eq!(
             preminers_original_balance
@@ -923,19 +918,17 @@ mod wallet_tests {
                 .unwrap();
             own_wallet_state
                 .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
+                    &premine_receiver_global_state.chain.light_state(),
                     &next_block,
                 )
                 .await?;
             add_block(&mut premine_receiver_global_state, block_1.clone())
                 .await
                 .unwrap();
+            let premine_receiver_light_state_ = premine_receiver_global_state.chain.light_state();
             premine_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                    &next_block,
-                )
+                .update_wallet_state_with_new_block(&premine_receiver_light_state_, &next_block)
                 .await?;
         }
 
@@ -994,19 +987,17 @@ mod wallet_tests {
             make_mock_block(&block_1, None, premine_wallet_spending_key.to_address());
         own_wallet_state
             .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
+                &premine_receiver_global_state.chain.light_state(),
                 &block_2_b,
             )
             .await?;
         add_block(&mut premine_receiver_global_state, block_2_b.clone())
             .await
             .unwrap();
+        let premine_receiver_light_state__ = premine_receiver_global_state.chain.light_state();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2_b,
-            )
+            .update_wallet_state_with_new_block(&premine_receiver_light_state__, &block_2_b)
             .await
             .unwrap();
         let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
@@ -1039,7 +1030,7 @@ mod wallet_tests {
             make_mock_block(&block_18, None, premine_wallet_spending_key.to_address());
         own_wallet_state
             .update_wallet_state_with_new_block(
-                &block_18.kernel.body.mutator_set_accumulator,
+                &premine_receiver_global_state.chain.light_state(),
                 &block_19,
             )
             .await?;
@@ -1114,7 +1105,7 @@ mod wallet_tests {
             .unwrap();
         own_wallet_state
             .update_wallet_state_with_new_block(
-                &block_2_b.kernel.body.mutator_set_accumulator,
+                &premine_receiver_global_state.chain.light_state(),
                 &block_3_b,
             )
             .await?;
@@ -1157,7 +1148,7 @@ mod wallet_tests {
             make_mock_block(&block_19, None, premine_wallet_spending_key.to_address());
         own_wallet_state
             .update_wallet_state_with_new_block(
-                &block_19.kernel.body.mutator_set_accumulator,
+                &premine_receiver_global_state.chain.light_state(),
                 &block_20,
             )
             .await?;

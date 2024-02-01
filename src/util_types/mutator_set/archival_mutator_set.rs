@@ -1,8 +1,8 @@
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -20,7 +20,7 @@ use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::mutator_set_trait::MutatorSet;
 use super::removal_record::RemovalRecord;
-use super::shared::CHUNK_SIZE;
+use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 use super::swbf_suffix::SwbfSuffix;
 
 pub struct ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
@@ -44,9 +44,14 @@ where
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
+        active_window_chunks: &ChunkDictionary<H>,
     ) -> MsMembershipProof<H> {
-        self.kernel
-            .prove(item, sender_randomness, receiver_preimage)
+        self.kernel.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            active_window_chunks,
+        )
     }
 
     fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -57,20 +62,24 @@ where
         self.kernel.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord) {
-        let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record);
-        match new_chunk {
+    fn add(
+        &mut self,
+        addition_record: &AdditionRecord,
+    ) -> Option<(u64, (MmrMembershipProof<H>, Chunk))> {
+        let new_chunk = self.kernel.add(addition_record);
+        match &new_chunk {
             None => (),
-            Some((chunk_index, chunk)) => {
+            Some((chunk_index, (_chunk_mmr_mp, chunk))) => {
                 // Sanity check to verify that we agree on the index
                 assert_eq!(
-                    chunk_index,
+                    *chunk_index,
                     self.chunks.len(),
                     "Length/index must agree when inserting a chunk into an archival node"
                 );
-                self.chunks.push(chunk);
+                self.chunks.push(chunk.clone());
             }
         }
+        new_chunk
     }
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
@@ -108,7 +117,7 @@ where
 {
     pub fn new_empty(aocl: MmrStorage, swbf_inactive: MmrStorage, chunks: ChunkStorage) -> Self {
         assert_eq!(0, aocl.len());
-        assert_eq!(0, swbf_inactive.len());
+        assert_eq!(WINDOW_SIZE as u64 / CHUNK_SIZE as u64, swbf_inactive.len());
         assert_eq!(0, chunks.len());
         let aocl: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(aocl);
         let swbf_inactive: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(swbf_inactive);
@@ -116,7 +125,7 @@ where
             kernel: MutatorSetKernel {
                 aocl,
                 swbf_inactive,
-                swbf_active: SwbfSuffix::<H, WINDOW_SIZE>::new(),
+                swbf_active: SwbfSuffix::<H, 0>::new(),
             },
             chunks,
         }
@@ -126,7 +135,7 @@ where
         aocl: MmrStorage,
         swbf_inactive: MmrStorage,
         chunks: ChunkStorage,
-        active_window: SwbfSuffix<H, WINDOW_SIZE>,
+        active_window: SwbfSuffix<H, 0>,
     ) -> Self {
         let aocl: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(aocl);
         let swbf_inactive: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(swbf_inactive);
@@ -139,6 +148,19 @@ where
             },
             chunks,
         }
+    }
+
+    /// Return a ChunkDictionary covering all chunks in the active window.
+    pub fn active_window_chunks(&self) -> ChunkDictionary<H> {
+        let num_chunks_in_active_window = WINDOW_SIZE as u32 / CHUNK_SIZE;
+        let total_num_chunks = self.chunks.len();
+        let mut dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)> = HashMap::new();
+        for index in (total_num_chunks - num_chunks_in_active_window as u64)..total_num_chunks {
+            let chunk = self.chunks.get(index);
+            let (mmr_mp, _peaks) = self.kernel.swbf_inactive.prove_membership(index);
+            dictionary.insert(index, (mmr_mp, chunk));
+        }
+        ChunkDictionary { dictionary }
     }
 
     /// Returns an authentication path for an element in the append-only commitment list
@@ -375,14 +397,19 @@ mod archival_mutator_set_tests {
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items: Vec<Digest> = vec![];
+        let active_window_chunks = ChunkDictionary::empty_active_window_chunks();
 
         for i in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &active_window_chunks,
+            );
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -501,7 +528,7 @@ mod archival_mutator_set_tests {
         let archival_mutator_set = rms.ams_mut();
 
         // Also keep track of a mutator set accumulator to verify that this uses an invertible Bloom filter
-        let mut msa = MutatorSetAccumulator::<H>::default();
+        let mut msa = MutatorSetAccumulator::<H>::new();
 
         let mut items = vec![];
         let mut mps = vec![];
@@ -771,8 +798,12 @@ mod archival_mutator_set_tests {
 
             let addition_record =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set.prove(
+                item,
+                sender_randomness,
+                receiver_preimage,
+                &archival_mutator_set.active_window_chunks(),
+            );
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -818,8 +849,12 @@ mod archival_mutator_set_tests {
 
                 let addition_record =
                     commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-                let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                let membership_proof = archival_mutator_set.prove(
+                    item,
+                    sender_randomness,
+                    receiver_preimage,
+                    &archival_mutator_set.active_window_chunks(),
+                );
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -887,8 +922,12 @@ mod archival_mutator_set_tests {
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
         let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+        let membership_proof = archival_mutator_set.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            &archival_mutator_set.active_window_chunks(),
+        );
 
         (item, addition_record, membership_proof)
     }
@@ -902,8 +941,12 @@ mod archival_mutator_set_tests {
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+        let membership_proof = archival_mutator_set.prove(
+            item,
+            sender_randomness,
+            receiver_preimage,
+            &archival_mutator_set.active_window_chunks(),
+        );
 
         (item, addition_record, membership_proof)
     }
