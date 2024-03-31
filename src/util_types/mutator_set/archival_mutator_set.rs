@@ -371,7 +371,10 @@ where
     }
 
     pub async fn get_batch_index_async(&self) -> u128 {
-        (self.aocl.count_leaves_async().await as u128) / (BATCH_SIZE as u128)
+        match self.aocl.count_leaves_async().await {
+            0 => 0,
+            n => (n - 1) as u128 / BATCH_SIZE as u128,
+        }
     }
 
     /// Helper function. Like `add` but also returns the chunk that
