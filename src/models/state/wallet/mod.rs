@@ -189,9 +189,9 @@ impl WalletSecret {
     /// requesting a new key for purposes of a new wallet receiving address,
     /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
     /// which takes &mut self.
-    pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
+    pub fn nth_generation_spending_key(&self, index: u16) -> generation_address::SpendingKey {
         assert!(
-            counter.is_zero(),
+            index.is_zero(),
             "For now we only support one generation address per wallet"
         );
 
@@ -202,7 +202,7 @@ impl WalletSecret {
                 self.secret_seed.0.encode(),
                 vec![
                     generation_address::GENERATION_FLAG,
-                    BFieldElement::new(counter.into()),
+                    BFieldElement::new(index.into()),
                 ],
             ]
             .concat(),

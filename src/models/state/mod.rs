@@ -536,7 +536,7 @@ impl GlobalState {
         &self,
         tx_outputs: &mut TxOutputList,
         change_utxo_notify_method: UtxoNotifyMethod,
-        change_key: SymmetricKey,
+        change_key: SpendingKeyType,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -574,7 +574,7 @@ impl GlobalState {
                         TxOutput::onchain(
                             utxo,
                             sender_randomness,
-                            change_key.privacy_digest(),
+                            change_key.to_address().privacy_digest(),
                             public_announcement,
                         )
                     }
