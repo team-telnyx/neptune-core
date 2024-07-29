@@ -78,7 +78,7 @@ impl From<ExpectedUtxo> for TxOutput {
         Self {
             utxo: expected_utxo.utxo.clone(),
             sender_randomness: expected_utxo.sender_randomness,
-            receiver_privacy_digest: expected_utxo.receiver_preimage.hash::<Hash>(),
+            receiver_privacy_digest: expected_utxo.receiver_privacy_digest,
             utxo_notification: UtxoNotification::OffChain(Box::new(expected_utxo)),
         }
     }

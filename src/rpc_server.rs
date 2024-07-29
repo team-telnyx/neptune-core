@@ -636,7 +636,7 @@ impl RPC for NeptuneRPCServer {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_symmetric_key();
+            .next_unused_spending_key(KeyType::Symmetric);
 
         // write state to disk, as create_transaction() may take a long time.
         self.state.flush_databases().await.expect("flushed DBs");
@@ -662,7 +662,7 @@ impl RPC for NeptuneRPCServer {
             .create_transaction(
                 &mut tx_outputs,
                 owned_utxo_notify_method,
-                change_key,
+                change_key.to_address(),
                 fee,
                 now,
             )

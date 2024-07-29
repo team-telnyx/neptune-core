@@ -25,6 +25,8 @@ use crate::models::{
     peer::InstanceId,
 };
 
+use super::wallet_state::WalletState;
+
 pub type Credibility = i32;
 
 // 28 days in secs
@@ -54,7 +56,7 @@ pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub addition_record: AdditionRecord,
     pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
+    pub receiver_privacy_digest: Digest,
     pub received_from: UtxoNotifier,
     pub notification_received: SystemTime,
     pub mined_in_block: Option<(Digest, SystemTime)>,
@@ -64,22 +66,35 @@ impl ExpectedUtxo {
     pub fn new(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_preimage: Digest,
+        receiver_privacy_digest: Digest,
         received_from: UtxoNotifier,
     ) -> Self {
         Self {
             addition_record: commit(
                 Hash::hash(&utxo),
                 sender_randomness,
-                receiver_preimage.hash::<Hash>(),
+                receiver_privacy_digest.hash::<Hash>(),
             ),
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             received_from,
             notification_received: SystemTime::now(),
             mined_in_block: None,
         }
+    }
+
+    fn scan_wallet_keys(&self, wallet_state: &WalletState) -> Option<AnnouncedUtxo> {
+        wallet_state
+            .get_all_known_spending_keys()
+            .iter()
+            .find(|key| self.receiver_privacy_digest == key.to_address().privacy_digest())
+            .map(|key| AnnouncedUtxo {
+                addition_record: self.addition_record,
+                utxo: self.utxo.clone(),
+                sender_randomness: self.sender_randomness,
+                receiver_preimage: key.privacy_preimage(),
+            })
     }
 }
 
@@ -190,12 +205,14 @@ impl UtxoNotificationPool {
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
     pub fn scan_for_expected_utxos<'a>(
         &'a self,
+        wallet_state: &'a WalletState,
         transaction: &'a Transaction,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
         transaction.kernel.outputs.iter().filter_map(|tx_output| {
-            self.notifications
-                .get(tx_output)
-                .map(|expected_utxo| expected_utxo.into())
+            match self.notifications.get(tx_output) {
+                Some(eu) => eu.scan_wallet_keys(wallet_state),
+                None => None,
+            }
         })
     }
 
@@ -210,7 +227,7 @@ impl UtxoNotificationPool {
         &mut self,
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_preimage: Digest,
+        receiver_privacy_digest: Digest,
         received_from: UtxoNotifier,
     ) -> Result<AdditionRecord> {
         // Check if UTXO notification exceeds peer's max number of allowed notifications
@@ -244,7 +261,7 @@ impl UtxoNotificationPool {
         let addition_record = commit(
             Hash::hash(&utxo),
             sender_randomness,
-            receiver_preimage.hash::<Hash>(),
+            receiver_privacy_digest,
         );
 
         // Check that addition record is not already contained in notification set.
@@ -258,7 +275,7 @@ impl UtxoNotificationPool {
             addition_record,
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             received_from: received_from.clone(),
             notification_received: SystemTime::now(),
             mined_in_block: None,
@@ -373,35 +390,42 @@ mod wallet_state_tests {
 
     use super::*;
     use crate::{
-        models::blockchain::{
-            transaction::utxo::LockScript, type_scripts::neptune_coins::NeptuneCoins,
+        config_models::network::Network,
+        models::{
+            blockchain::{
+                transaction::utxo::LockScript, type_scripts::neptune_coins::NeptuneCoins,
+            },
+            state::wallet::{address::KeyType, WalletSecret},
         },
-        tests::shared::make_mock_transaction,
+        tests::shared::{make_mock_transaction, mock_genesis_wallet_state},
     };
 
     #[traced_test]
     #[tokio::test]
     async fn utxo_notification_insert_remove_scan() {
+        let mut wallet_state =
+            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), Network::RegTest).await;
+        let spending_key = wallet_state.next_unused_spending_key(KeyType::Generation);
+        let sender_randomness: Digest = random();
+
         let mut notification_pool = UtxoNotificationPool::new(ByteSize::kb(1), 100);
         assert!(notification_pool.is_empty());
         assert!(notification_pool.len().is_zero());
-        let mock_utxo = Utxo {
-            lock_script_hash: LockScript::anyone_can_spend().hash(),
-            coins: NeptuneCoins::new(10).to_native_coins(),
-        };
-        let sender_randomness: Digest = random();
-        let receiver_preimage: Digest = random();
+        let mock_utxo = Utxo::new_native_coin(
+            spending_key.to_address().lock_script(),
+            NeptuneCoins::new(10),
+        );
         let peer_instance_id: InstanceId = random();
         let expected_addition_record = commit(
             Hash::hash(&mock_utxo),
             sender_randomness,
-            receiver_preimage.hash::<Hash>(),
+            spending_key.to_address().privacy_digest(),
         );
         notification_pool
             .add_expected_utxo(
                 mock_utxo.clone(),
                 sender_randomness,
-                receiver_preimage,
+                spending_key.to_address().privacy_digest(),
                 UtxoNotifier::PeerUnsigned((peer_instance_id, String::default()), 100),
             )
             .unwrap();
@@ -416,7 +440,7 @@ mod wallet_state_tests {
             make_mock_transaction(vec![], vec![expected_addition_record]);
 
         let ret_with_tx_containing_utxo = notification_pool
-            .scan_for_expected_utxos(&mock_tx_containing_expected_utxo)
+            .scan_for_expected_utxos(&wallet_state, &mock_tx_containing_expected_utxo)
             .collect_vec();
         assert_eq!(1, ret_with_tx_containing_utxo.len());
 
@@ -424,11 +448,11 @@ mod wallet_state_tests {
         let another_addition_record = commit(
             Hash::hash(&mock_utxo),
             random(),
-            receiver_preimage.hash::<Hash>(),
+            spending_key.to_address().privacy_digest(),
         );
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
         let ret_with_tx_without_utxo = notification_pool
-            .scan_for_expected_utxos(&tx_without_utxo)
+            .scan_for_expected_utxos(&wallet_state, &tx_without_utxo)
             .collect_vec();
         assert!(ret_with_tx_without_utxo.is_empty());
 

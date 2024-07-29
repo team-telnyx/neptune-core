@@ -350,6 +350,35 @@ impl SpendingKeyType {
             })
     }
 
+    // pub fn scan_expected_utxos<'a>(
+    //     &'a self,
+    //     expected_utxos: &'a [ExpectedUtxo],
+    // ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+    //     // pre-compute some fields.
+    //     let receiver_identifier = self.receiver_identifier();
+    //     let receiver_preimage = self.privacy_preimage();
+    //     let receiver_digest = receiver_preimage.hash::<Hash>();
+
+    //     // for all public announcements
+    //     expected_utxos
+    //         .iter()
+
+    //         // ... that match the receiver_privacy_digest this key's address
+    //         .filter(|eu| eu.receiver_privacy_digest == receiver_digest)
+
+    //         // ... map to AnnouncedUtxo
+    //         .map(|eu| {
+    //             // and join those with the receiver digest to get a commitment
+    //             // Note: the commitment is computed in the same way as in the mutator set.
+    //             AnnouncedUtxo {
+    //                 addition_record: eu.addition_record,
+    //                 utxo: eu.utxo.clone(),
+    //                 sender_randomness: sender_randomness,
+    //                 receiver_preimage,
+    //             }
+    //         })
+    // }
+
     /// converts a result into an Option and logs a warning on any error
     fn ok_warn<T>(&self, result: Result<T>) -> Option<T> {
         match result {

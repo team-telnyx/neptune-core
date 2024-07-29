@@ -3,7 +3,6 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityTree, WitnessType};
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::{triton_vm, twenty_first};
 
 pub mod primitive_witness;
@@ -64,17 +63,6 @@ pub struct AnnouncedUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
-}
-
-impl From<&ExpectedUtxo> for AnnouncedUtxo {
-    fn from(eu: &ExpectedUtxo) -> Self {
-        Self {
-            addition_record: eu.addition_record,
-            utxo: eu.utxo.clone(),
-            sender_randomness: eu.sender_randomness,
-            receiver_preimage: eu.receiver_preimage,
-        }
-    }
 }
 
 /// represents arbitrary data that can be stored in a transaction on the public blockchain

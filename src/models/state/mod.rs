@@ -42,7 +42,6 @@ use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use wallet::address::symmetric_key::SymmetricKey;
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -536,7 +535,7 @@ impl GlobalState {
         &self,
         tx_outputs: &mut TxOutputList,
         change_utxo_notify_method: UtxoNotifyMethod,
-        change_key: SpendingKeyType,
+        change_address: ReceivingAddressType,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -561,25 +560,25 @@ impl GlobalState {
             })?;
 
             let tx_output = {
-                let utxo = Utxo::new_native_coin(change_key.lock_script(), amount);
+                let utxo = Utxo::new_native_coin(change_address.lock_script(), amount);
                 let sender_randomness = self
                     .wallet_state
                     .wallet_secret
-                    .generate_sender_randomness(block_height, change_key.privacy_digest());
+                    .generate_sender_randomness(block_height, change_address.privacy_digest());
 
                 match change_utxo_notify_method {
                     UtxoNotifyMethod::OnChain => {
-                        let public_announcement = ReceivingAddressType::from(change_key)
+                        let public_announcement = change_address
                             .generate_public_announcement(&utxo, sender_randomness)?;
                         TxOutput::onchain(
                             utxo,
                             sender_randomness,
-                            change_key.to_address().privacy_digest(),
+                            change_address.privacy_digest(),
                             public_announcement,
                         )
                     }
                     UtxoNotifyMethod::OffChain => {
-                        TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
+                        TxOutput::offchain(utxo, sender_randomness, change_address.privacy_digest())
                     }
                 }
             };
@@ -647,21 +646,24 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+        use wallet::address::SpendingKeyType;
+
         let mut tx_outputs = TxOutputList::from(tx_output_vec);
 
         // note: should use next_unused_generation_spending_key()
         // but that requires &mut self.
-        let change_key = self
+        let change_key: SpendingKeyType = self
             .wallet_state
             .wallet_secret
-            .nth_symmetric_key_for_tests(0);
+            .nth_symmetric_key_for_tests(0)
+            .into();
 
         let len = tx_outputs.len();
         let transaction = self
             .create_transaction(
                 &mut tx_outputs,
                 UtxoNotifyMethod::OffChain,
-                change_key,
+                change_key.to_address(),
                 fee,
                 timestamp,
             )
@@ -797,7 +799,7 @@ impl GlobalState {
             self.wallet_state.expected_utxos.add_expected_utxo(
                 expected_utxo.utxo,
                 expected_utxo.sender_randomness,
-                expected_utxo.receiver_preimage,
+                expected_utxo.receiver_privacy_digest,
                 expected_utxo.received_from,
             )?;
         }
@@ -1269,7 +1271,7 @@ impl GlobalState {
                     .add_expected_utxo(
                         coinbase_info.utxo,
                         coinbase_info.sender_randomness,
-                        coinbase_info.receiver_preimage,
+                        coinbase_info.receiver_privacy_digest,
                         UtxoNotifier::OwnMiner,
                     )
                     .expect("UTXO notification from miner must be accepted");

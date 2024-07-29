@@ -657,7 +657,7 @@ mod wallet_tests {
             .add_expected_utxo(
                 cb_utxo,
                 cb_output_randomness,
-                own_spending_key.privacy_preimage,
+                own_spending_key.to_address().privacy_digest(),
                 UtxoNotifier::OwnMiner,
             )
             .unwrap();
@@ -718,7 +718,7 @@ mod wallet_tests {
                 .add_expected_utxo(
                     cb_utxo_prime,
                     cb_output_randomness_prime,
-                    own_spending_key.privacy_preimage,
+                    own_spending_key.to_address().privacy_digest(),
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();

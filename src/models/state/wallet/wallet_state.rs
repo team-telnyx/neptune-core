@@ -394,7 +394,7 @@ impl WalletState {
 
         let offchain_received_outputs = self
             .expected_utxos
-            .scan_for_expected_utxos(&transaction)
+            .scan_for_expected_utxos(self, &transaction)
             .collect_vec();
 
         let all_received_outputs =
