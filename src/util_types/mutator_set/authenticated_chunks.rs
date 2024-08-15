@@ -9,17 +9,18 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::slice::{Iter, IterMut};
 use std::vec::IntoIter;
-use tasm_lib::mmr::authentication_struct::shared::*;
+use tasm_lib::mmr::authentication_struct::shared::AuthStructIntegrityProof;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type AuthStruct = Vec<Digest>;
 type ChunkIndex = u64;
+type AuthenticatedChunk = (Chunk, MmrMembershipProof);
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary, BFieldCodec,
@@ -38,10 +39,6 @@ pub struct AuthenticatedChunks {
 }
 
 impl AuthenticatedChunks {
-    fn auth_paths_to_auth_struct(dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> AuthStruct {
-        todo!()
-    }
-
     pub fn empty() -> Self {
         Self {
             indexed_chunks: Vec::default(),
@@ -49,9 +46,42 @@ impl AuthenticatedChunks {
         }
     }
 
-    pub fn new(mut dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
-        dictionary.sort_by_key(|(k, _v)| *k);
-        Self { dictionary }
+    pub fn with_indexed_chunks(mut self, indexed_chunks: Vec<(u64, Chunk)>) -> Self {
+        self.indexed_chunks = indexed_chunks;
+        self
+    }
+
+    pub fn with_auth_structs(mut self, auth_structs: Vec<(u32, Vec<Digest>)>) -> Self {
+        self.auth_structs = auth_structs;
+        self
+    }
+
+    pub fn new(
+        indexed_authenticated_chunks: Vec<(ChunkIndex, AuthenticatedChunk)>,
+        mmra: &MmrAccumulator,
+    ) -> Self {
+        let indexed_authenticated_chunk_digests = indexed_authenticated_chunks
+            .iter()
+            .map(|(chk_idx, (chk, mmr_mp))| (*chk_idx, Hash::hash(chk), mmr_mp.clone()))
+            .collect_vec();
+        let peak_index_to_authenticated_struct =
+            AuthStructIntegrityProof::new_from_mmr_membership_proofs(
+                mmra,
+                indexed_authenticated_chunk_digests,
+            );
+
+        let indexed_chunks = indexed_authenticated_chunks
+            .into_iter()
+            .map(|(chk_idx, (chk, _mmr_mr))| (chk_idx, chk))
+            .collect_vec();
+        let mut ret = Self::empty().with_indexed_chunks(indexed_chunks);
+
+        for (peak_idx, authenticated_auth_struct) in peak_index_to_authenticated_struct {
+            ret.auth_structs
+                .push((peak_idx, authenticated_auth_struct.auth_struct));
+        }
+
+        ret
     }
 
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
