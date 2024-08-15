@@ -21,7 +21,7 @@ use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::chunk_dictionary::{
-    pseudorandom_chunk_dictionary, ChunkDictionary,
+    pseudorandom_chunk_dictionary, AuthenticatedChunks,
 };
 use crate::util_types::mutator_set::ms_membership_proof::{
     pseudorandom_mutator_set_membership_proof, MsMembershipProof,
@@ -31,7 +31,7 @@ use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
-pub fn random_chunk_dictionary() -> ChunkDictionary {
+pub fn random_chunk_dictionary() -> AuthenticatedChunks {
     let mut rng = thread_rng();
     pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>())
 }

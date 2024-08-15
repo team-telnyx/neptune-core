@@ -23,7 +23,7 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
+use super::chunk_dictionary::{pseudorandom_chunk_dictionary, AuthenticatedChunks};
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
@@ -55,7 +55,7 @@ pub struct MsMembershipProof {
     pub receiver_preimage: Digest,
     pub auth_path_aocl: MmrMembershipProof,
     pub aocl_leaf_index: u64,
-    pub target_chunks: ChunkDictionary,
+    pub target_chunks: AuthenticatedChunks,
 }
 
 impl MsMembershipProof {
@@ -414,7 +414,7 @@ impl MsMembershipProof {
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
-        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = membership_proofs
+        let mut chunk_dictionaries: Vec<&mut AuthenticatedChunks> = membership_proofs
             .iter_mut()
             .map(|mp| &mut mp.target_chunks)
             .collect();
@@ -562,7 +562,7 @@ pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembership
     let sender_randomness: Digest = rng.gen();
     let receiver_preimage: Digest = rng.gen();
     let (auth_path_aocl, aocl_leaf_index) = pseudorandom_mmr_membership_proof_with_index(rng.gen());
-    let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.gen());
+    let target_chunks: AuthenticatedChunks = pseudorandom_chunk_dictionary(rng.gen());
     MsMembershipProof {
         sender_randomness,
         receiver_preimage,
@@ -614,7 +614,7 @@ mod ms_proof_tests {
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 0,
-            target_chunks: ChunkDictionary::default(),
+            target_chunks: AuthenticatedChunks::default(),
         };
 
         let mp_with_different_leaf_index = MsMembershipProof {
@@ -622,7 +622,7 @@ mod ms_proof_tests {
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 100073,
-            target_chunks: ChunkDictionary::default(),
+            target_chunks: AuthenticatedChunks::default(),
         };
 
         let mp_with_different_sender_randomness = MsMembershipProof {
@@ -630,7 +630,7 @@ mod ms_proof_tests {
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 0,
-            target_chunks: ChunkDictionary::default(),
+            target_chunks: AuthenticatedChunks::default(),
         };
 
         let mp_with_different_receiver_preimage = MsMembershipProof {
@@ -638,7 +638,7 @@ mod ms_proof_tests {
             sender_randomness,
             auth_path_aocl: MmrMembershipProof::new(vec![]),
             aocl_leaf_index: 0,
-            target_chunks: ChunkDictionary::default(),
+            target_chunks: AuthenticatedChunks::default(),
         };
 
         // Verify that a different data index (a different auth path) is a different MP

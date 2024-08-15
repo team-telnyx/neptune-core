@@ -9,6 +9,7 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::slice::{Iter, IterMut};
 use std::vec::IntoIter;
+use tasm_lib::mmr::authentication_struct::shared::*;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -17,23 +18,34 @@ use super::chunk::Chunk;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
+type AuthStruct = Vec<Digest>;
 type ChunkIndex = u64;
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary, BFieldCodec,
 )]
-pub struct ChunkDictionary {
-    // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
+pub struct AuthenticatedChunks {
+    // {chunk index => chunk value)}
     // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
     // don't care about the cost of reallocation when `insert`ing or
     // `remove`ing.
-    dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
+    indexed_chunks: Vec<(u64, Chunk)>,
+
+    /// A mapping from MMR peak-indices to authentication structures.
+    /// The authentication structures validate all chunks that belong under
+    /// the indexed peak.
+    auth_structs: Vec<(u32, Vec<Digest>)>,
 }
 
-impl ChunkDictionary {
+impl AuthenticatedChunks {
+    fn auth_paths_to_auth_struct(dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> AuthStruct {
+        todo!()
+    }
+
     pub fn empty() -> Self {
         Self {
-            dictionary: Vec::new(),
+            indexed_chunks: Vec::default(),
+            auth_structs: Vec::default(),
         }
     }
 
@@ -41,6 +53,7 @@ impl ChunkDictionary {
         dictionary.sort_by_key(|(k, _v)| *k);
         Self { dictionary }
     }
+
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
         self.dictionary
             .iter()
@@ -156,7 +169,7 @@ impl ChunkDictionary {
     }
 }
 
-impl IntoIterator for ChunkDictionary {
+impl IntoIterator for AuthenticatedChunks {
     type Item = (ChunkIndex, AuthenticatedChunk);
 
     type IntoIter = IntoIter<(ChunkIndex, AuthenticatedChunk)>;
@@ -167,7 +180,7 @@ impl IntoIterator for ChunkDictionary {
 }
 
 /// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
-pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
+pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> AuthenticatedChunks {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     let mut dictionary = vec![];
@@ -186,7 +199,7 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
             ),
         ));
     }
-    ChunkDictionary::new(dictionary)
+    AuthenticatedChunks::new(dictionary)
 }
 
 #[cfg(test)]
@@ -204,8 +217,8 @@ mod chunk_dict_tests {
 
     #[tokio::test]
     async fn hash_test() {
-        let chunkdict0 = ChunkDictionary::default();
-        let chunkdict00 = ChunkDictionary::default();
+        let chunkdict0 = AuthenticatedChunks::default();
+        let chunkdict00 = AuthenticatedChunks::default();
         assert_eq!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict00));
 
         // Insert elements
@@ -221,7 +234,7 @@ mod chunk_dict_tests {
             }
         };
         let value1 = (mp1, chunk1);
-        let chunkdict1 = ChunkDictionary::new(vec![(key1, value1.clone())]);
+        let chunkdict1 = AuthenticatedChunks::new(vec![(key1, value1.clone())]);
 
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
@@ -230,10 +243,11 @@ mod chunk_dict_tests {
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
-        let chunkdict2 = ChunkDictionary::new(vec![(key1, value1.clone()), (key2, value2.clone())]);
+        let chunkdict2 =
+            AuthenticatedChunks::new(vec![(key1, value1.clone()), (key2, value2.clone())]);
 
         let key3: u64 = 89;
-        let chunkdict3 = ChunkDictionary::new(vec![
+        let chunkdict3 = AuthenticatedChunks::new(vec![
             (key1, value1.clone()),
             (key2, value2.clone()),
             (key3, value2.clone()),
@@ -247,7 +261,7 @@ mod chunk_dict_tests {
         assert_ne!(Hash::hash(&chunkdict2), Hash::hash(&chunkdict3));
 
         // Construct similar data structure to `two_elements` but insert key/value pairs in opposite order
-        let chunkdict3_alt = ChunkDictionary::new(vec![
+        let chunkdict3_alt = AuthenticatedChunks::new(vec![
             (key3, value2.clone()),
             (key1, value1.clone()),
             (key2, value2.clone()),
@@ -259,7 +273,7 @@ mod chunk_dict_tests {
 
         // Negative: Construct data structure where the keys and values are switched
         let chunkdict3_switched =
-            ChunkDictionary::new(vec![(key1, value2.clone()), (key2, value1), (key3, value2)]);
+            AuthenticatedChunks::new(vec![(key1, value2.clone()), (key2, value1), (key3, value2)]);
 
         assert_ne!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_switched));
     }
@@ -269,10 +283,10 @@ mod chunk_dict_tests {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        let s_empty: ChunkDictionary = ChunkDictionary::empty();
+        let s_empty: AuthenticatedChunks = AuthenticatedChunks::empty();
         let json = serde_json::to_string(&s_empty).unwrap();
         println!("json = {}", json);
-        let s_back = serde_json::from_str::<ChunkDictionary>(&json).unwrap();
+        let s_back = serde_json::from_str::<AuthenticatedChunks>(&json).unwrap();
         assert!(s_back.is_empty());
 
         // Build a non-empty chunk dict and verify that it still works
@@ -284,10 +298,11 @@ mod chunk_dict_tests {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };
 
-        let s_non_empty = ChunkDictionary::new(vec![(key, (mp.clone(), chunk.clone()))]);
+        let s_non_empty = AuthenticatedChunks::new(vec![(key, (mp.clone(), chunk.clone()))]);
         let json_non_empty = serde_json::to_string(&s_non_empty).unwrap();
         println!("json_non_empty = {}", json_non_empty);
-        let s_back_non_empty = serde_json::from_str::<ChunkDictionary>(&json_non_empty).unwrap();
+        let s_back_non_empty =
+            serde_json::from_str::<AuthenticatedChunks>(&json_non_empty).unwrap();
         assert!(!s_back_non_empty.is_empty());
         assert!(s_back_non_empty.contains_key(&key));
         assert_eq!((mp, chunk), s_back_non_empty.get(&key).unwrap().clone());
@@ -298,7 +313,7 @@ mod chunk_dict_tests {
         let chunk_dictionary = random_chunk_dictionary();
 
         let encoded = chunk_dictionary.encode();
-        let decoded = *ChunkDictionary::decode(&encoded).unwrap();
+        let decoded = *AuthenticatedChunks::decode(&encoded).unwrap();
 
         assert_eq!(chunk_dictionary, decoded);
     }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::{
     active_window::ActiveWindow,
     chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
+    chunk_dictionary::AuthenticatedChunks,
     get_swbf_indices,
     mmra_and_membership_proofs::MmraAndMembershipProofs,
     ms_membership_proof::MsMembershipProof,
@@ -190,7 +190,7 @@ impl Arbitrary for MsaAndRecords {
                                         is
                                     })
                                     .map(|chunk_indices| {
-                                        ChunkDictionary::new(
+                                        AuthenticatedChunks::new(
                                             chunk_indices
                                             .iter()
                                             .filter(|chunk_index| **chunk_index < swbf_mmr_size)

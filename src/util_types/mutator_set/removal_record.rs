@@ -19,7 +19,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
+use super::chunk_dictionary::{pseudorandom_chunk_dictionary, AuthenticatedChunks};
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
@@ -162,7 +162,7 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
 )]
 pub struct RemovalRecord {
     pub absolute_indices: AbsoluteIndexSet,
-    pub target_chunks: ChunkDictionary,
+    pub target_chunks: AuthenticatedChunks,
 }
 
 impl RemovalRecord {
@@ -283,7 +283,7 @@ impl RemovalRecord {
     ) {
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
-        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = removal_records
+        let mut chunk_dictionaries: Vec<&mut AuthenticatedChunks> = removal_records
             .iter_mut()
             .map(|mp| &mut mp.target_chunks)
             .collect();

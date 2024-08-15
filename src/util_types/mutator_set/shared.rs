@@ -8,7 +8,7 @@ use tasm_lib::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use super::chunk_dictionary::ChunkDictionary;
+use super::chunk_dictionary::AuthenticatedChunks;
 use super::removal_record::RemovalRecord;
 
 pub const WINDOW_SIZE: u32 = 1 << 20;
@@ -56,7 +56,7 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 #[allow(clippy::type_complexity)]
 pub fn get_batch_mutation_argument_for_removal_record(
     removal_record: &RemovalRecord,
-    chunk_dictionaries: &mut [&mut ChunkDictionary],
+    chunk_dictionaries: &mut [&mut AuthenticatedChunks],
 ) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
     let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =
@@ -158,7 +158,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
 #[allow(clippy::type_complexity)]
 pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     removal_record: &RemovalRecord,
-    chunk_dictionaries: &mut [&mut ChunkDictionary],
+    chunk_dictionaries: &mut [&mut AuthenticatedChunks],
 ) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
     let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =

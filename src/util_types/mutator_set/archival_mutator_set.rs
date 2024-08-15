@@ -16,7 +16,7 @@ use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
 use super::archival_mmr::ArchivalMmr;
 use super::chunk::Chunk;
-use super::chunk_dictionary::ChunkDictionary;
+use super::chunk_dictionary::AuthenticatedChunks;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
@@ -214,7 +214,7 @@ where
             .filter(|bi| **bi < window_start)
             .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
             .collect();
-        let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
+        let mut target_chunks: AuthenticatedChunks = AuthenticatedChunks::default();
 
         let stream = self.chunks.stream_many(chunk_indices).await;
         pin_mut!(stream); // needed for iteration
@@ -406,7 +406,7 @@ where
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // insert all indices
-        let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
+        let mut new_target_chunks: AuthenticatedChunks = removal_record.target_chunks.clone();
         let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
             removal_record.get_chunkidx_to_indices_dict();
 
@@ -841,7 +841,7 @@ mod archival_mutator_set_tests {
         fake_indices[0] = 0;
         let fake_removal_record = RemovalRecord {
             absolute_indices: AbsoluteIndexSet::new(&fake_indices),
-            target_chunks: ChunkDictionary::default(),
+            target_chunks: AuthenticatedChunks::default(),
         };
 
         // This next line should panic, as we're attempting to remove an index that is not present

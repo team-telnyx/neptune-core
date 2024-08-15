@@ -18,7 +18,7 @@ use twenty_first::util_types::{
 };
 
 use super::chunk::Chunk;
-use super::chunk_dictionary::ChunkDictionary;
+use super::chunk_dictionary::AuthenticatedChunks;
 use super::get_swbf_indices;
 use super::removal_record::AbsoluteIndexSet;
 use super::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
@@ -120,7 +120,7 @@ impl MutatorSetAccumulator {
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         // insert all indices
-        let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
+        let mut new_target_chunks: AuthenticatedChunks = removal_record.target_chunks.clone();
         let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
             removal_record.get_chunkidx_to_indices_dict();
 
@@ -225,7 +225,7 @@ impl MutatorSetAccumulator {
         // simulate adding to commitment list
         let aocl_leaf_index = self.aocl.num_leafs();
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
-        let target_chunks: ChunkDictionary = ChunkDictionary::default();
+        let target_chunks: AuthenticatedChunks = AuthenticatedChunks::default();
 
         // return membership proof
         MsMembershipProof {
