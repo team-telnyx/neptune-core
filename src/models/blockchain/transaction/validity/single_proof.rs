@@ -787,7 +787,7 @@ mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::validity::update::test::deterministic_update_witness;
     use crate::models::blockchain::transaction::validity::update::Update;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_generators::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;

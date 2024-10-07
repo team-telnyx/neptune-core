@@ -68,7 +68,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+use crate::models::blockchain::type_scripts::time_lock::arbitrary_generators::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::channel::MainToPeerThread;
 use crate::models::channel::PeerThreadToMain;

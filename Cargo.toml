@@ -147,6 +147,9 @@ harness = false
 name = "consensus"
 harness = false
 
+[features]
+benchmarking = []
+
 [patch.crates-io]
 # branch master, 2024-10-02
 tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "b4735945" }

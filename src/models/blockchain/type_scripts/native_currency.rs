@@ -653,7 +653,7 @@ pub mod test {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_generators::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::triton_vm::prelude::InstructionError;

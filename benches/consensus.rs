@@ -2,6 +2,7 @@ fn main() {
     divan::main();
 }
 
+#[cfg(feature = "benchmarking")]
 mod transaction {
     use std::fs::create_dir_all;
     use std::fs::File;
@@ -20,7 +21,7 @@ mod transaction {
     use neptune_core::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
     use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
-    use neptune_core::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use neptune_core::models::blockchain::type_scripts::time_lock::arbitrary_generators::arbitrary_primitive_witness_with_active_timelocks;
     use neptune_core::models::proof_abstractions::tasm::program::ConsensusProgram;
     use neptune_core::models::proof_abstractions::timestamp::Timestamp;
     use neptune_core::models::proof_abstractions::SecretWitness;
