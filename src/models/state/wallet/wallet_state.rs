@@ -363,8 +363,16 @@ impl WalletState {
             .unwrap()
     }
 
-    // note: does not verify we do not have any dups.
+    /// notifies wallet to expect a utxo in a future block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the expected UTXO is already in the list.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
+        if self.has_expected_utxo(&expected_utxo).await {
+            panic!("ExpectedUtxo already exists in wallet");
+        }
+
         self.wallet_db
             .expected_utxos_mut()
             .push(expected_utxo)
@@ -389,6 +397,43 @@ impl WalletState {
             ))
             .await;
         }
+    }
+
+    /// check if wallet already has the provided `expected_utxo`
+    ///
+    /// this fn is o(n) with the number of ExpectedUtxo stored.  Iteration is
+    /// performed from newest to oldest based on expectation that we will most
+    /// often be working with recent ExpectedUtxos.
+    pub(crate) async fn has_expected_utxo(&self, expected_utxo: &ExpectedUtxo) -> bool {
+        let len = self.wallet_db.expected_utxos().len().await;
+        self.wallet_db
+            .expected_utxos()
+            .stream_many_values((0..len).rev())
+            .await
+            .any(|eu| futures::future::ready(eu == *expected_utxo))
+            .await
+    }
+
+    /// find the `MonitoredUtxo` that matches `utxo`, if any
+    ///
+    /// perf: this fn is o(n) with the number of MonitoredUtxo stored.  Iteration
+    ///       is performed from newest to oldest based on expectation that we
+    ///       will most often be working with recent MonitoredUtxos.
+    pub(crate) async fn find_monitored_utxo(&self, utxo: &Utxo) -> Option<MonitoredUtxo> {
+        let len = self.wallet_db.monitored_utxos().len().await;
+        let stream = self
+            .wallet_db
+            .monitored_utxos()
+            .stream_many_values((0..len).rev())
+            .await;
+        pin_mut!(stream); // needed for iteration
+
+        while let Some(mu) = stream.next().await {
+            if mu.utxo == *utxo {
+                return Some(mu);
+            }
+        }
+        None
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
