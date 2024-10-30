@@ -93,7 +93,6 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -840,7 +839,7 @@ pub(crate) async fn valid_successor_for_tests(
         predecessor.body().mutator_set_accumulator.clone(),
     )
     .unwrap();
-    let tx = GlobalState::create_raw_transaction(
+    let tx = Transaction::create_raw_transaction(
         tx_details,
         TxProvingCapability::SingleProof,
         &TritonProverSync::dummy(),

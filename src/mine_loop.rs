@@ -29,7 +29,6 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
@@ -261,7 +260,7 @@ pub(crate) async fn make_coinbase_transaction(
     // that prevents peers from connecting to this node.
     info!("Start: generate single proof for coinbase transaction");
     let wait_if_busy = global_state_lock.wait_if_busy();
-    let transaction = GlobalState::create_raw_transaction(
+    let transaction = Transaction::create_raw_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
         &wait_if_busy,

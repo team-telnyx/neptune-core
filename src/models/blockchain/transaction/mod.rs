@@ -1,10 +1,14 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
+use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::prelude::twenty_first;
 
 pub mod lock_script;
@@ -24,14 +28,19 @@ use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use primitive_witness::SaltedUtxos;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
 use tokio::sync::TryLockError;
+use tracing::debug;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -107,7 +116,7 @@ pub struct PublicAnnouncement {
 }
 
 impl PublicAnnouncement {
-    pub fn new(message: Vec<BFieldElement>) -> Self {
+    pub(crate) fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
     }
 }
@@ -131,7 +140,7 @@ impl TransactionProof {
         }
     }
 
-    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
+    pub(crate) async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
             TransactionProof::Invalid => false,
             TransactionProof::Witness(primitive_witness) => {
@@ -177,6 +186,196 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
+    /// creates a Transaction.
+    ///
+    /// This API provides the caller complete control over selection of inputs
+    /// and outputs.  When fine grained control is not required,
+    /// [GlobalState::create_transaction()] is easier to use and should be preferred.
+    ///
+    /// It is the caller's responsibility to provide inputs and outputs such
+    /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
+    ///
+    /// Note that this means the caller must calculate the `change` amount if any
+    /// and provide an output for the change.
+    ///
+    /// The `tx_outputs` parameter should normally be generated with
+    /// [GlobalState::generate_tx_outputs()] which determines which outputs should
+    /// be notified `OnChain` or `OffChain`.
+    ///
+    /// After this call returns, it is the caller's responsibility to inform the
+    /// wallet of any returned [ExpectedUtxo] for utxos that match wallet keys.
+    /// Failure to do so can result in loss of funds!
+    ///
+    /// Note that `create_raw_transaction()` does not modify any state and does
+    /// not require acquiring write lock.  This is important becauce internally
+    /// it calls prove() which is a very lengthy operation.
+    ///
+    /// Example:
+    ///
+    /// See the implementation of [GlobalState::create_transaction()].
+    pub(crate) async fn create_raw_transaction(
+        transaction_details: TransactionDetails,
+        proving_power: TxProvingCapability,
+        sync_device: &TritonProverSync,
+    ) -> Result<Transaction, TryLockError> {
+        // note: this executes the prover which can take a very
+        //       long time, perhaps minutes.  The `await` here, should avoid
+        //       block the tokio executor and other async tasks.
+        Self::create_transaction_from_data_worker(transaction_details, proving_power, sync_device)
+            .await
+    }
+
+    // note: this executes the prover which can take a very
+    //       long time, perhaps minutes. It should never be
+    //       called directly.
+    //       Use create_transaction_from_data() instead.
+    //
+    async fn create_transaction_from_data_worker(
+        transaction_details: TransactionDetails,
+        proving_power: TxProvingCapability,
+        sync_device: &TritonProverSync,
+    ) -> Result<Transaction, TryLockError> {
+        let TransactionDetails {
+            tx_inputs,
+            tx_outputs,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_accumulator,
+        } = transaction_details;
+
+        // complete transaction kernel
+        let removal_records = tx_inputs
+            .iter()
+            .map(|txi| txi.removal_record(&mutator_set_accumulator))
+            .collect_vec();
+        let kernel = TransactionKernel {
+            inputs: removal_records,
+            outputs: tx_outputs.addition_records(),
+            public_announcements: tx_outputs.public_announcements(),
+            fee,
+            timestamp,
+            coinbase,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+        };
+
+        // populate witness
+        let output_utxos = tx_outputs.utxos();
+        let unlocked_utxos = tx_inputs;
+        let sender_randomnesses = tx_outputs.sender_randomnesses();
+        let receiver_digests = tx_outputs.receiver_digests();
+        let primitive_witness = Self::generate_primitive_witness(
+            unlocked_utxos,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+            kernel.clone(),
+            mutator_set_accumulator,
+        );
+
+        debug!("primitive witness for transaction: {}", primitive_witness);
+
+        info!(
+            "Start: generate proof for {}-in {}-out transaction",
+            primitive_witness.input_utxos.utxos.len(),
+            primitive_witness.output_utxos.utxos.len()
+        );
+        let proof = match proving_power {
+            TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
+            TxProvingCapability::LockScript => todo!(),
+            TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
+                ProofCollection::produce(&primitive_witness, sync_device).await?,
+            ),
+            TxProvingCapability::SingleProof => TransactionProof::SingleProof(
+                SingleProof::produce(&primitive_witness, sync_device).await?,
+            ),
+        };
+
+        Ok(Transaction { kernel, proof })
+    }
+
+    /// Generate a primitive witness for a transaction from various disparate witness data.
+    ///
+    /// # Panics
+    /// Panics if transaction validity cannot be satisfied.
+    pub(crate) fn generate_primitive_witness(
+        unlocked_utxos: Vec<UnlockedUtxo>,
+        output_utxos: Vec<Utxo>,
+        sender_randomnesses: Vec<Digest>,
+        receiver_digests: Vec<Digest>,
+        transaction_kernel: TransactionKernel,
+        mutator_set_accumulator: MutatorSetAccumulator,
+    ) -> PrimitiveWitness {
+        /// Generate a salt to use for [SaltedUtxos], deterministically.
+        fn generate_secure_pseudorandom_seed(
+            input_utxos: &Vec<Utxo>,
+            output_utxos: &Vec<Utxo>,
+            sender_randomnesses: &Vec<Digest>,
+        ) -> [u8; 32] {
+            let preimage = [
+                input_utxos.encode(),
+                output_utxos.encode(),
+                sender_randomnesses.encode(),
+            ]
+            .concat();
+            let seed = Tip5::hash_varlen(&preimage);
+            let seed: [u8; Digest::BYTES] = seed.into();
+
+            seed[0..32].try_into().unwrap()
+        }
+
+        let input_utxos = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.utxo.to_owned())
+            .collect_vec();
+        let salt_seed =
+            generate_secure_pseudorandom_seed(&input_utxos, &output_utxos, &sender_randomnesses);
+
+        let mut rng: StdRng = SeedableRng::from_seed(salt_seed);
+        let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
+        let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
+
+        let type_script_hashes = input_utxos
+            .iter()
+            .chain(output_utxos.iter())
+            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
+            .unique()
+            .collect_vec();
+        let type_scripts_and_witnesses = type_script_hashes
+            .into_iter()
+            .map(|type_script_hash| {
+                match_type_script_and_generate_witness(
+                    type_script_hash,
+                    transaction_kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                )
+                .expect("type script hash should be known.")
+            })
+            .collect_vec();
+        let input_lock_scripts_and_witnesses = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.lock_script_and_witness())
+            .cloned()
+            .collect_vec();
+        let input_membership_proofs = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.mutator_set_mp().to_owned())
+            .collect_vec();
+
+        PrimitiveWitness {
+            input_utxos: salted_input_utxos,
+            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
+            type_scripts_and_witnesses,
+            input_membership_proofs,
+            output_utxos: salted_output_utxos,
+            output_sender_randomnesses: sender_randomnesses.to_vec(),
+            output_receiver_digests: receiver_digests.to_vec(),
+            mutator_set_accumulator,
+            kernel: transaction_kernel,
+        }
+    }
+
     /// Create a new transaction with primitive witness for a new mutator set.
     pub(crate) fn new_with_primitive_witness_ms_data(
         old_primitive_witness: PrimitiveWitness,
@@ -372,7 +571,7 @@ impl Transaction {
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that for Proof witnesses, this will
     /// invalidate the proof, requiring an update.
-    pub async fn new_with_updated_mutator_set_records(
+    pub(crate) async fn new_with_updated_mutator_set_records(
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -406,7 +605,7 @@ impl Transaction {
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
-    pub async fn is_valid(&self) -> bool {
+    pub(crate) async fn is_valid(&self) -> bool {
         let kernel_hash = self.kernel.mast_hash();
         self.proof.verify(kernel_hash).await
     }
@@ -420,7 +619,7 @@ impl Transaction {
     /// set hashes are not the same, if both transactions have coinbase a
     /// coinbase UTXO, or if either of the transactions are *not* a single
     /// proof.
-    pub async fn merge_with(
+    pub(crate) async fn merge_with(
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
@@ -486,7 +685,7 @@ impl Transaction {
 
     /// Calculates a fraction representing the fee-density, defined as:
     /// `transaction_fee/transaction_size`.
-    pub fn fee_density(&self) -> BigRational {
+    pub(crate) fn fee_density(&self) -> BigRational {
         let transaction_as_bytes = bincode::serialize(&self).unwrap();
         let transaction_size = BigInt::from(transaction_as_bytes.get_size());
         let transaction_fee = self.kernel.fee.to_nau();
@@ -502,7 +701,7 @@ impl Transaction {
     /// PrimitiveWitness::validate and ProofCollection/RemovalRecordsIntegrity.
     /// AOCL membership is a feature of *validity*, which is a pre-requisite to
     /// confirmability.
-    pub fn is_confirmable_relative_to(
+    pub(crate) fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {
