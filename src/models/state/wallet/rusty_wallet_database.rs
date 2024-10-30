@@ -28,7 +28,7 @@ pub struct RustyWalletDatabase {
 }
 
 impl RustyWalletDatabase {
-    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
+    pub(crate) async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyWalletDatabase-Schema",
@@ -58,39 +58,39 @@ impl RustyWalletDatabase {
     }
 
     /// get monitored_utxos.
-    pub fn monitored_utxos(&self) -> &DbtVec<MonitoredUtxo> {
+    pub(crate) fn monitored_utxos(&self) -> &DbtVec<MonitoredUtxo> {
         &self.monitored_utxos
     }
 
     /// get mutable monitored_utxos.
-    pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
+    pub(crate) fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
         &mut self.monitored_utxos
     }
 
     /// get expected_utxos.
-    pub fn expected_utxos(&self) -> &DbtVec<ExpectedUtxo> {
+    pub(crate) fn expected_utxos(&self) -> &DbtVec<ExpectedUtxo> {
         &self.expected_utxos
     }
 
     /// get mutable expected_utxos.
-    pub fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
+    pub(crate) fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
         &mut self.expected_utxos
     }
 
     /// Get the hash of the block to which this database is synced.
-    pub async fn get_sync_label(&self) -> Digest {
+    pub(crate) async fn get_sync_label(&self) -> Digest {
         self.sync_label.get().await
     }
 
-    pub async fn set_sync_label(&mut self, sync_label: Digest) {
+    pub(crate) async fn set_sync_label(&mut self, sync_label: Digest) {
         self.sync_label.set(sync_label).await;
     }
 
-    pub async fn get_counter(&self) -> u64 {
+    pub(crate) async fn get_counter(&self) -> u64 {
         self.counter.get().await
     }
 
-    pub async fn set_counter(&mut self, counter: u64) {
+    pub(crate) async fn set_counter(&mut self, counter: u64) {
         self.counter.set(counter).await;
     }
 }

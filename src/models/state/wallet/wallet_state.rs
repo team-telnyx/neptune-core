@@ -178,7 +178,7 @@ impl WalletState {
         Ok(ret)
     }
 
-    pub async fn new_from_wallet_secret(
+    pub(crate) async fn new_from_wallet_secret(
         data_dir: &DataDirectory,
         wallet_secret: WalletSecret,
         cli_args: &Args,
@@ -317,21 +317,21 @@ impl WalletState {
         }
     }
 
-    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    pub(crate) fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
         self.mempool_spent_utxos
             .values()
             .flatten()
             .map(|(utxo, ..)| utxo)
     }
 
-    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    pub(crate) fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
         self.mempool_unspent_utxos
             .values()
             .flatten()
             .map(|a| &a.utxo)
     }
 
-    pub async fn confirmed_balance(
+    pub(crate) async fn confirmed_balance(
         &self,
         tip_digest: Digest,
         timestamp: Timestamp,
@@ -341,7 +341,7 @@ impl WalletState {
         wallet_status.synced_unspent_available_amount(timestamp)
     }
 
-    pub async fn unconfirmed_balance(
+    pub(crate) async fn unconfirmed_balance(
         &self,
         tip_digest: Digest,
         timestamp: Timestamp,
@@ -457,7 +457,7 @@ impl WalletState {
     /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
     ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
-    pub async fn scan_for_expected_utxos<'a>(
+    pub(crate) async fn scan_for_expected_utxos<'a>(
         &'a self,
         tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
@@ -496,7 +496,7 @@ impl WalletState {
     /// note: DbtVec does not have a remove().
     ///       So it is implemented by clearing all ExpectedUtxo from DB and
     ///       adding back those that are not stale.
-    pub async fn prune_stale_expected_utxos(&mut self) {
+    pub(crate) async fn prune_stale_expected_utxos(&mut self) {
         // prune un-received ExpectedUtxo after 28 days in secs
         const UNRECEIVED_UTXO_SECS: u64 = 28 * 24 * 60 * 60;
 
@@ -529,20 +529,20 @@ impl WalletState {
 
     // returns true if the utxo can be unlocked by one of the
     // known wallet keys.
-    pub fn can_unlock(&self, utxo: &Utxo) -> bool {
+    pub(crate) fn can_unlock(&self, utxo: &Utxo) -> bool {
         self.find_spending_key_for_utxo(utxo).is_some()
     }
 
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
     // wallet keys.
-    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
+    pub(crate) fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
             .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
     }
 
     /// returns all spending keys of all key types with derivation index less than current counter
-    pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
+    pub(crate) fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
         KeyType::all_types()
             .into_iter()
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
@@ -550,7 +550,7 @@ impl WalletState {
     }
 
     /// returns all spending keys of `key_type` with derivation index less than current counter
-    pub fn get_known_spending_keys(&self, key_type: KeyType) -> Vec<SpendingKey> {
+    pub(crate) fn get_known_spending_keys(&self, key_type: KeyType) -> Vec<SpendingKey> {
         match key_type {
             KeyType::Generation => self.get_known_generation_spending_keys(),
             KeyType::Symmetric => self.get_known_symmetric_keys(),
@@ -594,7 +594,7 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
+    pub(crate) fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
         match key_type {
             KeyType::Generation => self.next_unused_generation_spending_key().into(),
             KeyType::Symmetric => self.next_unused_symmetric_key().into(),
@@ -619,13 +619,13 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
+    pub(crate) fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
         self.wallet_secret.nth_symmetric_key(0)
     }
 
     /// Update wallet state with new block. Assume the given block
     /// is valid and that the wallet state is not up to date yet.
-    pub async fn update_wallet_state_with_new_block(
+    pub(crate) async fn update_wallet_state_with_new_block(
         &mut self,
         current_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
@@ -1005,7 +1005,7 @@ impl WalletState {
         Ok(())
     }
 
-    pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
+    pub(crate) async fn is_synced_to(&self, tip_hash: Digest) -> bool {
         let db_sync_digest = self.wallet_db.get_sync_label().await;
         if db_sync_digest != tip_hash {
             return false;
@@ -1023,7 +1023,7 @@ impl WalletState {
             .await
     }
 
-    pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
+    pub(crate) async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -1126,7 +1126,9 @@ impl WalletState {
         Ok(input_funds)
     }
 
-    pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
+    pub(crate) async fn get_all_own_coins_with_possible_timelocks(
+        &self,
+    ) -> Vec<CoinWithPossibleTimeLock> {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut own_coins = vec![];
 
