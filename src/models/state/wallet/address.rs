@@ -1,5 +1,5 @@
 mod address_type;
-mod common;
+pub mod common;
 
 pub mod generation_address;
 pub mod symmetric_key;

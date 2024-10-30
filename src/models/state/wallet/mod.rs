@@ -4,6 +4,7 @@ pub mod expected_utxo;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod unlocked_utxo;
+pub mod utxo_transfer_encrypted;
 pub mod wallet_state;
 pub mod wallet_status;
 

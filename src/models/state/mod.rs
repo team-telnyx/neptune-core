@@ -396,6 +396,35 @@ impl GlobalState {
         max(max_confirmed_in_block, max_spent_in_block)
     }
 
+    /// claim a utxo
+    ///
+    /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
+    /// for the current network and the wallet must have the corresponding
+    /// `SpendingKey` for decryption.
+    ///
+    /// upon success, a new `ExpectedUtxo` will be added to the local wallet
+    /// state.
+    ///
+    /// if the utxo has already been claimed, an error will result.
+    pub async fn claim_utxo(&mut self, utxo_transfer_encrypted_str: String) -> Result<()> {
+        // deserialize UtxoTransferEncrypted from bech32m string.
+        let utxo_transfer_encrypted =
+            UtxoTransferEncrypted::from_bech32m(&utxo_transfer_encrypted_str, self.cli().network)?;
+
+        // acquire global state read lock
+        let state = self.lock_guard().await;
+
+        // find known spending key by receiver_identifier
+        let spending_key = state
+            .wallet_state
+            .find_known_spending_key_for_receiver_identifier(
+                utxo_transfer_encrypted.receiver_identifier,
+            )
+            .ok_or(anyhow!("utxo does not match any known wallet key"))?;
+
+        todo!()
+    }
+
     /// Retrieve wallet balance history
     pub async fn get_balance_history(&self) -> Vec<(Digest, Timestamp, BlockHeight, NeptuneCoins)> {
         let current_tip_digest = self.chain.light_state().hash();

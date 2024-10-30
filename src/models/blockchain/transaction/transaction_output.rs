@@ -12,6 +12,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::utxo_transfer_encrypted::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
 use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -58,8 +59,6 @@ pub(crate) struct UtxoNotificationPayload {
 }
 
 impl UtxoNotificationPayload {
-    // TODO: Remove test flag when used in main code.
-    #[cfg(test)]
     pub(crate) fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
         Self {
             utxo,
@@ -238,6 +237,20 @@ impl TxOutput {
         self.receiver_digest
     }
 
+    pub(crate) fn offchain_utxo_notification(&self) -> Option<UtxoTransferEncrypted> {
+        match self.notification_method {
+            UtxoNotifyMethod::OnChain(_) => None,
+            UtxoNotifyMethod::OffChain(receiving_address) => {
+                let notification_payload = UtxoNotificationPayload {
+                    utxo: self.utxo(),
+                    sender_randomness: self.sender_randomness(),
+                };
+                // Some(receiving_address.generate_public_announcement(notification_payload))
+            }
+            UtxoNotifyMethod::None => None,
+        }
+    }
+
     pub(crate) fn public_announcement(&self) -> Option<PublicAnnouncement> {
         match &self.notification_method {
             UtxoNotifyMethod::None => None,
@@ -305,23 +318,9 @@ impl From<Option<TxOutput>> for TxOutputList {
     }
 }
 
-// Killed because: this mapping requires wallet info!
-// impl From<&TxOutputList> for Vec<ExpectedUtxo> {
-//     fn from(list: &TxOutputList) -> Self {
-//         list.expected_utxos_iter().collect()
-//     }
-// }
-
-// Killed because: this mapping requires recipient info!
-// impl From<&TxOutputList> for Vec<PublicAnnouncement> {
-//     fn from(list: &TxOutputList) -> Self {
-//         list.public_announcements_iter().into_iter().collect()
-//     }
-// }
-
 impl TxOutputList {
     /// calculates total amount in native currency
-    pub fn total_native_coins(&self) -> NeptuneCoins {
+    pub(crate) fn total_native_coins(&self) -> NeptuneCoins {
         self.0
             .iter()
             .map(|u| u.utxo.get_native_currency_amount())
@@ -329,12 +328,12 @@ impl TxOutputList {
     }
 
     /// retrieves utxos
-    pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
+    pub(crate) fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
         self.0.iter().map(|u| u.utxo.clone())
     }
 
     /// retrieves utxos
-    pub fn utxos(&self) -> Vec<Utxo> {
+    pub(crate) fn utxos(&self) -> Vec<Utxo> {
         self.utxos_iter().into_iter().collect()
     }
 
@@ -347,12 +346,12 @@ impl TxOutputList {
     }
 
     /// retrieves addition_records
-    pub fn addition_records_iter(&self) -> impl IntoIterator<Item = AdditionRecord> + '_ {
+    pub(crate) fn addition_records_iter(&self) -> impl IntoIterator<Item = AdditionRecord> + '_ {
         self.0.iter().map(|u| u.into())
     }
 
     /// retrieves addition_records
-    pub fn addition_records(&self) -> Vec<AdditionRecord> {
+    pub(crate) fn addition_records(&self) -> Vec<AdditionRecord> {
         self.addition_records_iter().into_iter().collect()
     }
 
@@ -369,7 +368,7 @@ impl TxOutputList {
     }
 
     /// indicates if any offchain notifications exist
-    pub fn has_offchain(&self) -> bool {
+    pub(crate) fn has_offchain(&self) -> bool {
         self.0.iter().any(|u| u.is_offchain())
     }
 
