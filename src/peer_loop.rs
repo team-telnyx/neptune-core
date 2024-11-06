@@ -10,6 +10,7 @@ use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
+use num_traits::Zero;
 use tasm_lib::triton_vm::prelude::Digest;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -27,6 +28,7 @@ use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
 use crate::models::peer::transfer_block::TransferBlock;
+use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
@@ -34,6 +36,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanctionReason;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
@@ -1043,6 +1046,126 @@ impl PeerLoopHandler {
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockProposalNotification(block_proposal_notification) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalNotification"),
+                );
+
+                if !self.global_state_lock.cli().guess {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let expected_height = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header()
+                    .height
+                    .next();
+                if block_proposal_notification.height != expected_height {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let maybe_existing_fee = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .block_proposal
+                    .as_ref()
+                    .map(|x| x.total_guesser_reward());
+                let request = match maybe_existing_fee {
+                    Some(existing_reward) => {
+                        existing_reward < block_proposal_notification.guesser_fee
+                    }
+                    None => !block_proposal_notification.guesser_fee.is_zero(),
+                };
+
+                if request {
+                    peer.send(PeerMessage::BlockProposalRequest(
+                        BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
+                    ))
+                    .await?;
+                }
+
+                return Ok(KEEP_CONNECTION_ALIVE);
+            }
+            PeerMessage::BlockProposalRequest(block_proposal_request) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalRequest"),
+                );
+
+                let matching_proposal = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .block_proposal
+                    .as_ref()
+                    .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
+                    .map(|x| x.to_owned());
+                if let Some(proposal) = matching_proposal {
+                    peer.send(PeerMessage::BlockProposal(proposal)).await?;
+                } else {
+                    self.punish(PeerSanctionReason::BlockProposalNotFound)
+                        .await?;
+                }
+
+                return Ok(KEEP_CONNECTION_ALIVE);
+            }
+            PeerMessage::BlockProposal(block) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposal"),
+                );
+
+                info!("Got block proposal from peer.");
+                if !self.global_state_lock.cli().guess {
+                    self.punish(PeerSanctionReason::UnwantedMessage).await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Verify validity and that proposal is child of current tip
+                let tip = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .to_owned();
+                if !block.is_valid(&tip, self.now()) {
+                    self.punish(PeerSanctionReason::InvalidBlockProposal)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Block proposal is valid. Verify that it's more valuable
+                // than what we're currently guessing on.
+                let maybe_existing_fee = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .block_proposal
+                    .as_ref()
+                    .map(|x| x.total_guesser_reward());
+                let accept = match maybe_existing_fee {
+                    Some(existing_reward) => existing_reward < block.total_guesser_reward(),
+                    None => !block.total_guesser_reward().is_zero(),
+                };
+
+                if !accept {
+                    self.punish(PeerSanctionReason::NonFavorableBlockProposal)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                self.to_main_tx
+                    .send(PeerTaskToMain::BlockProposal(Box::new(block)))
+                    .await?;
+
+                return Ok(KEEP_CONNECTION_ALIVE);
             }
         }
     }

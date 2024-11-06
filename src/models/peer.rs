@@ -35,6 +35,8 @@ const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
 const UNCONFIRMABLE_TRANSACTION: u16 = 2;
 const NO_STANDING_FOUND_MAYBE_CRASH: u16 = 10;
+const BLOCK_PROPOSAL_NOT_FOUND_SEVERITY: u16 = 1;
+const UNWANTED_MESSAGE_SEVERITY: u16 = 1;
 
 pub type InstanceId = u128;
 
@@ -77,6 +79,12 @@ pub enum PeerSanctionReason {
     InvalidTransaction,
     UnconfirmableTransaction,
 
+    BlockProposalNotFound,
+    InvalidBlockProposal,
+    NonFavorableBlockProposal,
+
+    UnwantedMessage,
+
     NoStandingFoundMaybeCrash,
 }
 
@@ -106,6 +114,10 @@ impl Display for PeerSanctionReason {
             PeerSanctionReason::NoStandingFoundMaybeCrash => {
                 "No standing found in map. Did peer task crash?"
             }
+            PeerSanctionReason::BlockProposalNotFound => "Block proposal not found",
+            PeerSanctionReason::InvalidBlockProposal => "Invalid block proposal",
+            PeerSanctionReason::UnwantedMessage => "unwanted message",
+            PeerSanctionReason::NonFavorableBlockProposal => "non-favorable block proposal",
         };
         write!(f, "{string}")
     }
@@ -153,6 +165,10 @@ impl PeerSanctionReason {
             PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
             PeerSanctionReason::NonMinedTransactionHasCoinbase => INVALID_TRANSACTION,
             PeerSanctionReason::NoStandingFoundMaybeCrash => NO_STANDING_FOUND_MAYBE_CRASH,
+            PeerSanctionReason::BlockProposalNotFound => BLOCK_PROPOSAL_NOT_FOUND_SEVERITY,
+            PeerSanctionReason::InvalidBlockProposal => INVALID_BLOCK_SEVERITY,
+            PeerSanctionReason::UnwantedMessage => UNWANTED_MESSAGE_SEVERITY,
+            PeerSanctionReason::NonFavorableBlockProposal => UNWANTED_MESSAGE_SEVERITY,
         }
     }
 }
@@ -269,6 +285,17 @@ pub struct BlockRequestBatch {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct BlockProposalRequest {
+    pub(crate) body_mast_hash: Digest,
+}
+
+impl BlockProposalRequest {
+    pub(crate) fn new(body_mast_hash: Digest) -> Self {
+        Self { body_mast_hash }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
@@ -280,7 +307,13 @@ pub(crate) enum PeerMessage {
     /// A list of block digests containing the
     BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+
     BlockProposalNotification(BlockProposalNotification),
+
+    BlockProposalRequest(BlockProposalRequest),
+
+    BlockProposal(Block),
+
     /// Send a full transaction object to a peer.
     Transaction(Box<TransferTransaction>),
     /// Send a notification to a peer, informing it that this node stores the
@@ -317,6 +350,8 @@ impl PeerMessage {
             PeerMessage::Bye => "bye",
             PeerMessage::ConnectionStatus(_) => "connection status",
             PeerMessage::BlockProposalNotification(_) => "block proposal notification",
+            PeerMessage::BlockProposalRequest(_) => "block proposal request",
+            PeerMessage::BlockProposal(_) => "block proposal",
         }
         .to_string()
     }
@@ -339,6 +374,8 @@ impl PeerMessage {
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => false,
+            PeerMessage::BlockProposalRequest(_) => false,
+            PeerMessage::BlockProposal(_) => false,
         }
     }
 
@@ -361,6 +398,8 @@ impl PeerMessage {
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => true,
+            PeerMessage::BlockProposalRequest(_) => true,
+            PeerMessage::BlockProposal(_) => true,
         }
     }
 }

@@ -836,6 +836,12 @@ impl Block {
         self.encode().len()
     }
 
+    /// The amount rewarded to the guesser who finds a valid nonce for this
+    /// block.
+    pub(crate) fn total_guesser_reward(&self) -> NeptuneCoins {
+        self.body().transaction_kernel.fee
+    }
+
     /// Get the block's guesser fee UTXOs.
     ///
     /// The amounts in the UTXOs are taken from the transaction fee.
@@ -849,7 +855,7 @@ impl Block {
         let lock = self.header().nonce;
         let lock_script = LockScript::hash_lock(lock);
 
-        let total_guesser_reward = self.body().transaction_kernel.fee;
+        let total_guesser_reward = self.total_guesser_reward();
         let mut value_locked = total_guesser_reward;
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();

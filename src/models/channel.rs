@@ -112,6 +112,7 @@ pub(crate) enum PeerTaskToMain {
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
     Transaction(Box<PeerTaskToMainTransaction>),
+    BlockProposal(Box<Block>),
 }
 
 #[derive(Clone, Debug)]
@@ -123,14 +124,14 @@ pub struct PeerTaskToMainTransaction {
 impl PeerTaskToMain {
     pub fn get_type(&self) -> String {
         match self {
-            PeerTaskToMain::NewBlocks(_) => "new blocks".to_string(),
-            PeerTaskToMain::AddPeerMaxBlockHeight(_) => "add peer max block height".to_string(),
-            PeerTaskToMain::RemovePeerMaxBlockHeight(_) => {
-                "remove peer max block height".to_string()
-            }
-            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
-            PeerTaskToMain::Transaction(_) => "transaction".to_string(),
+            PeerTaskToMain::NewBlocks(_) => "new blocks",
+            PeerTaskToMain::AddPeerMaxBlockHeight(_) => "add peer max block height",
+            PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
+            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
+            PeerTaskToMain::Transaction(_) => "transaction",
+            PeerTaskToMain::BlockProposal(_) => "block proposal",
         }
+        .to_string()
     }
 }
 

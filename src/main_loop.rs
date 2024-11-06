@@ -375,7 +375,7 @@ impl MainLoopHandler {
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         [
-                            vec![new_block_info.composer_utxos.as_ref().clone()],
+                            new_block_info.composer_utxos,
                             new_block_info.guesser_fee_utxo_infos,
                         ]
                         .concat(),
@@ -599,6 +599,21 @@ impl MainLoopHandler {
                     .send(MainToPeerTask::TransactionNotification(
                         transaction_notification,
                     ))?;
+            }
+            PeerTaskToMain::BlockProposal(block) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerTaskToMain::BlockProposal"),
+                );
+
+                debug!("main loop received block proposal from peer loop");
+
+                // TODO: Due to race-conditions, we need to verify that this
+                // block is still the immediate child of tip. If it is, and
+                // it has a higher guesser fee than what we're currently working
+                // on, then we switch to this, and notify the miner to mine
+                // on this new block.
+
+                todo!()
             }
         }
 
