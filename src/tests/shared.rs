@@ -810,7 +810,7 @@ pub(crate) async fn valid_block_from_tx_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
-    let mut block = Block::make_block_template(
+    let mut block = Block::compose(
         predecessor,
         tx,
         timestamp,

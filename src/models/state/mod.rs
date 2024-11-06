@@ -268,6 +268,9 @@ pub struct GlobalState {
     /// The `Mempool` may only be updated by the main task.
     pub mempool: Mempool,
 
+    /// The block proposal to which guessers contribute proof-of-work.
+    pub(crate) block_proposal: Option<Block>,
+
     // Only the mining task should write to this, anyone can read.
     pub mining: bool,
 }
@@ -287,6 +290,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
+            block_proposal: None,
             mining,
         }
     }
@@ -2250,7 +2254,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             block_transaction,
             in_seven_months,
@@ -2455,7 +2459,7 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-        let block_2 = Block::make_block_template(
+        let block_2 = Block::compose(
             &block_1,
             block_transaction2,
             in_eight_months,
@@ -2487,7 +2491,7 @@ mod global_state_tests {
         let (cb, _) = make_coinbase_transaction(&global_state_lock, guesser_fraction, now)
             .await
             .unwrap();
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             cb,
             now,
@@ -3077,7 +3081,7 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
-                let block_1 = Block::make_block_template(
+                let block_1 = Block::compose(
                     &genesis_block,
                     alice_to_bob_tx,
                     seven_months_post_launch,

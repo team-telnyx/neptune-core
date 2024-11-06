@@ -1215,7 +1215,7 @@ mod wallet_tests {
             .await
             .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
-        let block_3_b = Block::make_block_template(
+        let block_3_b = Block::compose(
             &block_2_b,
             merged_tx,
             timestamp,
@@ -1399,7 +1399,7 @@ mod wallet_tests {
             )
             .await
             .unwrap();
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             tx_for_block,
             in_seven_months,

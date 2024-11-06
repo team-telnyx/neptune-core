@@ -1,12 +1,16 @@
 use std::net::SocketAddr;
 
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
+use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::peer::transaction_notification::TransactionNotification;
+use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 
 #[derive(Clone, Debug)]
@@ -31,13 +35,14 @@ pub enum MainToMiner {
 #[derive(Clone, Debug)]
 pub struct NewBlockFound {
     pub block: Box<Block>,
-    pub coinbase_utxo_info: Box<ExpectedUtxo>,
+    pub composer_utxos: Vec<ExpectedUtxo>,
     pub guesser_fee_utxo_infos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug)]
 pub enum MinerToMain {
     NewBlockFound(NewBlockFound),
+    BlockProposal(Block),
 }
 
 #[derive(Clone, Debug)]
@@ -51,9 +56,27 @@ pub struct MainToPeerTaskBatchBlockRequest {
     pub(crate) known_blocks: Vec<Digest>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct BlockProposalNotification {
+    pub(crate) body_mast_hash: Digest,
+    pub(crate) guesser_fee: NeptuneCoins,
+    pub(crate) height: BlockHeight,
+}
+
+impl From<&Block> for BlockProposalNotification {
+    fn from(value: &Block) -> Self {
+        Self {
+            body_mast_hash: value.body().mast_hash(),
+            guesser_fee: value.body().transaction_kernel.fee,
+            height: value.header().height,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
+    BlockProposalNotification(BlockProposalNotification),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
@@ -66,17 +89,19 @@ pub(crate) enum MainToPeerTask {
 impl MainToPeerTask {
     pub fn get_type(&self) -> String {
         match self {
-            MainToPeerTask::Block(_) => "block".to_string(),
-            MainToPeerTask::RequestBlockBatch(_) => "req block batch".to_string(),
-            MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
-            MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),
+            MainToPeerTask::Block(_) => "block",
+            MainToPeerTask::RequestBlockBatch(_) => "req block batch",
+            MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
+            MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req",
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {
-                "make specific peer discovery req".to_string()
+                "make specific peer discovery req"
             }
-            MainToPeerTask::TransactionNotification(_) => "transaction notification".to_string(),
-            MainToPeerTask::Disconnect(_) => "disconnect".to_string(),
-            MainToPeerTask::DisconnectAll() => "disconnect all".to_string(),
+            MainToPeerTask::TransactionNotification(_) => "transaction notification",
+            MainToPeerTask::Disconnect(_) => "disconnect",
+            MainToPeerTask::DisconnectAll() => "disconnect all",
+            MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
         }
+        .to_string()
     }
 }
 

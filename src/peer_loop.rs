@@ -1166,6 +1166,19 @@ impl PeerLoopHandler {
                 debug!("Sent PeerMessage::TransactionNotification");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::MainToPeerTask::BlockProposalNotification"),
+                );
+
+                debug!("Sending PeerMessage::BlockProposalNotification");
+                peer.send(PeerMessage::BlockProposalNotification(
+                    block_proposal_notification,
+                ))
+                .await?;
+                debug!("Sent PeerMessage::BlockProposalNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
         }
     }
 

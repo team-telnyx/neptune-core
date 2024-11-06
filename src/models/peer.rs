@@ -18,6 +18,7 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
+use super::channel::BlockProposalNotification;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::peer::transfer_block::TransferBlock;
@@ -279,6 +280,7 @@ pub(crate) enum PeerMessage {
     /// A list of block digests containing the
     BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+    BlockProposalNotification(BlockProposalNotification),
     /// Send a full transaction object to a peer.
     Transaction(Box<TransferTransaction>),
     /// Send a notification to a peer, informing it that this node stores the
@@ -299,22 +301,24 @@ pub(crate) enum PeerMessage {
 impl PeerMessage {
     pub fn get_type(&self) -> String {
         match self {
-            PeerMessage::Handshake(_) => "handshake".to_string(),
-            PeerMessage::Block(_) => "block".to_string(),
-            PeerMessage::BlockNotificationRequest => "block notification request".to_string(),
-            PeerMessage::BlockNotification(_) => "block notification".to_string(),
-            PeerMessage::BlockRequestByHeight(_) => "block req by height".to_string(),
-            PeerMessage::BlockRequestByHash(_) => "block req by hash".to_string(),
-            PeerMessage::BlockRequestBatch(_) => "block req batch".to_string(),
-            PeerMessage::BlockResponseBatch(_) => "block resp batch".to_string(),
-            PeerMessage::Transaction(_) => "send".to_string(),
-            PeerMessage::TransactionNotification(_) => "transaction notification".to_string(),
-            PeerMessage::TransactionRequest(_) => "transaction request".to_string(),
-            PeerMessage::PeerListRequest => "peer list req".to_string(),
-            PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
-            PeerMessage::Bye => "bye".to_string(),
-            PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
+            PeerMessage::Handshake(_) => "handshake",
+            PeerMessage::Block(_) => "block",
+            PeerMessage::BlockNotificationRequest => "block notification request",
+            PeerMessage::BlockNotification(_) => "block notification",
+            PeerMessage::BlockRequestByHeight(_) => "block req by height",
+            PeerMessage::BlockRequestByHash(_) => "block req by hash",
+            PeerMessage::BlockRequestBatch(_) => "block req batch",
+            PeerMessage::BlockResponseBatch(_) => "block resp batch",
+            PeerMessage::Transaction(_) => "send",
+            PeerMessage::TransactionNotification(_) => "transaction notification",
+            PeerMessage::TransactionRequest(_) => "transaction request",
+            PeerMessage::PeerListRequest => "peer list req",
+            PeerMessage::PeerListResponse(_) => "peer list resp",
+            PeerMessage::Bye => "bye",
+            PeerMessage::ConnectionStatus(_) => "connection status",
+            PeerMessage::BlockProposalNotification(_) => "block proposal notification",
         }
+        .to_string()
     }
 
     pub fn ignore_when_not_sync(&self) -> bool {
@@ -334,6 +338,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
+            PeerMessage::BlockProposalNotification(_) => false,
         }
     }
 
@@ -355,6 +360,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
+            PeerMessage::BlockProposalNotification(_) => true,
         }
     }
 }

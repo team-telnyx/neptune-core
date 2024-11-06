@@ -1636,7 +1636,7 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated block transaction");
 
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             block_tx,
             in_seven_months,
@@ -1860,7 +1860,7 @@ mod archival_state_tests {
             )
             .await
             .unwrap();
-        let block_2 = Block::make_block_template(
+        let block_2 = Block::compose(
             &block_1,
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,

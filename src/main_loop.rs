@@ -375,7 +375,7 @@ impl MainLoopHandler {
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         [
-                            vec![new_block_info.coinbase_utxo_info.as_ref().clone()],
+                            vec![new_block_info.composer_utxos.as_ref().clone()],
                             new_block_info.guesser_fee_utxo_infos,
                         ]
                         .concat(),
@@ -395,6 +395,11 @@ impl MainLoopHandler {
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
+            }
+            MinerToMain::BlockProposal(block) => {
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::BlockProposalNotification((&block).into()));
+                self.global_state_lock.lock_guard_mut().await.block_proposal = Some(block.clone());
             }
         }
         Ok(())

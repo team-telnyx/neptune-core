@@ -253,8 +253,10 @@ impl Block {
         Ok(Block::new(header, body, appendix, proof))
     }
 
-    /// Prepare a Block for mining
-    pub(crate) async fn make_block_template(
+    /// Compose a block.
+    ///
+    /// Create a block with valid block proof, but without proof-of-work.
+    pub(crate) async fn compose(
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
