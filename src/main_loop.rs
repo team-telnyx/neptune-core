@@ -397,9 +397,13 @@ impl MainLoopHandler {
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
             }
-            MinerToMain::BlockProposal((block, expected_utxos)) => {
+            MinerToMain::BlockProposal(boxed_proposal) => {
+                let (block, expected_utxos) = *boxed_proposal;
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&block).into()));
+                    .send(MainToPeerTask::BlockProposalNotification((&block).into()))
+                    .expect(
+                        "Peer handler broadcast channel prematurely closed. This should never happen.",
+                    );
                 self.global_state_lock.lock_guard_mut().await.block_proposal =
                     BlockProposal::OwnComposition((block.clone(), expected_utxos));
             }

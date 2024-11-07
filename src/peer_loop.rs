@@ -1089,7 +1089,7 @@ impl PeerLoopHandler {
                     .await?;
                 }
 
-                return Ok(KEEP_CONNECTION_ALIVE);
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
                 let _ = crate::ScopeDurationLogger::new(
@@ -1110,7 +1110,7 @@ impl PeerLoopHandler {
                         .await?;
                 }
 
-                return Ok(KEEP_CONNECTION_ALIVE);
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposal(block) => {
                 let _ = crate::ScopeDurationLogger::new(
@@ -1162,7 +1162,7 @@ impl PeerLoopHandler {
                     .send(PeerTaskToMain::BlockProposal(Box::new(block)))
                     .await?;
 
-                return Ok(KEEP_CONNECTION_ALIVE);
+                Ok(KEEP_CONNECTION_ALIVE)
             }
         }
     }

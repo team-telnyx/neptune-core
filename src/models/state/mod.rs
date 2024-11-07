@@ -283,24 +283,15 @@ impl BlockProposal {
     }
 
     pub(crate) fn is_none(&self) -> bool {
-        match self {
-            BlockProposal::None => true,
-            _ => false,
-        }
+        matches!(self, BlockProposal::None)
     }
 
     pub(crate) fn is_own(&self) -> bool {
-        match self {
-            BlockProposal::OwnComposition(_) => true,
-            _ => false,
-        }
+        matches!(self, BlockProposal::OwnComposition(_))
     }
 
     pub(crate) fn is_foreign(&self) -> bool {
-        match self {
-            BlockProposal::ForeignComposition(_) => true,
-            _ => false,
-        }
+        matches!(self, BlockProposal::ForeignComposition(_))
     }
 
     /// Map the inner block (if any) to some result

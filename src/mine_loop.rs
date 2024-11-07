@@ -442,10 +442,10 @@ pub async fn mine(
 
                     // Send proposal to main_loop to share with peers.
                     to_main
-                        .send(MinerToMain::BlockProposal((
+                        .send(MinerToMain::BlockProposal(Box::new((
                             proposal.clone(),
                             composer_utxos.clone(),
-                        )))
+                        ))))
                         .await
                         .expect("Channel to main closed");
 

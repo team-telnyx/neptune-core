@@ -765,7 +765,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .to_owned();
 
     let guesser_fee_fraction = 0f64;
-    let (transaction, coinbase_expected_utxo) = crate::mine_loop::create_block_transaction(
+    let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,
         global_state_lock,
         timestamp,
@@ -784,7 +784,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let expected_utxos = block
         .guesser_fee_expected_utxos(nonce_preimage)
         .into_iter()
-        .chain([coinbase_expected_utxo])
+        .chain(expected_composer_utxos)
         .collect_vec();
 
     global_state_lock

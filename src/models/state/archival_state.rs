@@ -1620,7 +1620,7 @@ mod archival_state_tests {
         println!("Generated transaction for Alice and Bob.");
 
         let guesser_fraction = 0f64;
-        let (cbtx, cb_expected) =
+        let (cbtx, expected_composer_utxos) =
             make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
@@ -1671,7 +1671,7 @@ mod archival_state_tests {
                 .await;
             genesis_state
                 .wallet_state
-                .add_expected_utxo(cb_expected)
+                .add_expected_utxos(expected_composer_utxos)
                 .await;
         }
 
@@ -1839,7 +1839,7 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (cbtx2, cb_expected2) =
+        let (cbtx2, expected_composer_utxos2) =
             make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
@@ -1893,7 +1893,7 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(cb_expected2)
+            .add_expected_utxos(expected_composer_utxos2)
             .await;
 
         // Update chain states

@@ -42,7 +42,7 @@ pub struct NewBlockFound {
 #[derive(Clone, Debug)]
 pub enum MinerToMain {
     NewBlockFound(NewBlockFound),
-    BlockProposal((Block, Vec<ExpectedUtxo>)),
+    BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
 }
 
 #[derive(Clone, Debug)]
