@@ -45,6 +45,7 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::BlockProposal;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 
@@ -396,10 +397,11 @@ impl MainLoopHandler {
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
             }
-            MinerToMain::BlockProposal(block) => {
+            MinerToMain::BlockProposal((block, expected_utxos)) => {
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::BlockProposalNotification((&block).into()));
-                self.global_state_lock.lock_guard_mut().await.block_proposal = Some(block.clone());
+                self.global_state_lock.lock_guard_mut().await.block_proposal =
+                    BlockProposal::OwnComposition((block.clone(), expected_utxos));
             }
         }
         Ok(())
@@ -478,7 +480,7 @@ impl MainLoopHandler {
                 }
 
                 // Inform miner to work on a new block
-                if self.global_state_lock.cli().mine {
+                if self.global_state_lock.cli().mine() {
                     self.main_to_miner_tx
                         .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }

@@ -230,7 +230,7 @@ pub(crate) async fn mock_genesis_global_state(
         networking_state,
         cli_args.clone(),
         mempool,
-        cli_args.mine,
+        cli_args.mine(),
     )
 }
 

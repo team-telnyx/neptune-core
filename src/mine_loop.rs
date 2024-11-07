@@ -29,6 +29,7 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::BlockProposal;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -407,10 +408,11 @@ pub async fn mine(
         } else {
             // composing step
 
-            let maybe_block_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
-            let (proposal, composer_utxos) = match maybe_block_proposal {
-                Some(prop) => (prop, vec![]),
-                None => {
+            let block_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+            let (proposal, composer_utxos) = match block_proposal {
+                BlockProposal::OwnComposition((prop, composer_utxos)) => (prop, composer_utxos),
+                BlockProposal::ForeignComposition(prop) => (prop, vec![]),
+                BlockProposal::None => {
                     // Build the block template and spawn the worker task to mine on it
                     let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
                     let now = Timestamp::now();
@@ -440,7 +442,10 @@ pub async fn mine(
 
                     // Send proposal to main_loop to share with peers.
                     to_main
-                        .send(MinerToMain::BlockProposal(proposal.clone()))
+                        .send(MinerToMain::BlockProposal((
+                            proposal.clone(),
+                            composer_utxos.clone(),
+                        )))
                         .await
                         .expect("Channel to main closed");
 

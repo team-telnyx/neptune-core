@@ -202,6 +202,11 @@ impl Args {
             n => Some(Duration::from_secs(n)),
         }
     }
+
+    /// Whether to engage in mining (composing or guessing or both)
+    pub(crate) fn mine(&self) -> bool {
+        self.guess || self.compose
+    }
 }
 
 #[cfg(test)]

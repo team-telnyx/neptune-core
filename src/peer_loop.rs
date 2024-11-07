@@ -1074,7 +1074,6 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .block_proposal
-                    .as_ref()
                     .map(|x| x.total_guesser_reward());
                 let request = match maybe_existing_fee {
                     Some(existing_reward) => {
@@ -1102,7 +1101,6 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .block_proposal
-                    .as_ref()
                     .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
                     .map(|x| x.to_owned());
                 if let Some(proposal) = matching_proposal {
@@ -1148,7 +1146,6 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .block_proposal
-                    .as_ref()
                     .map(|x| x.total_guesser_reward());
                 let accept = match maybe_existing_fee {
                     Some(existing_reward) => existing_reward < block.total_guesser_reward(),

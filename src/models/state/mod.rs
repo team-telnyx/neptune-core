@@ -248,6 +248,92 @@ impl DerefMut for GlobalStateLock {
     }
 }
 
+/// A proposed block to extend the block chain with.
+///
+/// Block proposals have valid correctness proofs, but do not have proof-of-work
+/// (yet). Guessers can contribute proof-of-work to a block proposal and, if
+/// successful, the block proposal becomes a block.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum BlockProposal {
+    OwnComposition((Block, Vec<ExpectedUtxo>)),
+    ForeignComposition(Block),
+    #[default]
+    None,
+}
+
+impl BlockProposal {
+    pub(crate) fn own_proposal(block: Block, expected_utxos: Vec<ExpectedUtxo>) -> Self {
+        Self::OwnComposition((block, expected_utxos))
+    }
+
+    pub(crate) fn foreign_proposal(block: Block) -> Self {
+        Self::ForeignComposition(block)
+    }
+
+    pub(crate) fn unwrap(self) -> Block {
+        match self {
+            BlockProposal::OwnComposition((block, _expected_utxos)) => block,
+            BlockProposal::ForeignComposition(block) => block,
+            BlockProposal::None => panic!("Cannot unwrap `None` `BlockProposal`"),
+        }
+    }
+
+    pub(crate) fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        match self {
+            BlockProposal::None => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_own(&self) -> bool {
+        match self {
+            BlockProposal::OwnComposition(_) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_foreign(&self) -> bool {
+        match self {
+            BlockProposal::ForeignComposition(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Map the inner block (if any) to some result
+    pub fn map<T, F: FnOnce(&Block) -> T>(&self, function: F) -> Option<T> {
+        match self {
+            BlockProposal::OwnComposition((block, _)) => Some(function(block)),
+            BlockProposal::ForeignComposition(block) => Some(function(block)),
+            BlockProposal::None => None,
+        }
+    }
+
+    /// Map the inner block (if any) to None if the predicate does not hold
+    pub fn filter<F: FnOnce(&Block) -> bool>(&self, predicate: F) -> Option<&Block> {
+        match self {
+            BlockProposal::OwnComposition((block, _)) => {
+                if predicate(block) {
+                    Some(block)
+                } else {
+                    None
+                }
+            }
+            BlockProposal::ForeignComposition(block) => {
+                if predicate(block) {
+                    Some(block)
+                } else {
+                    None
+                }
+            }
+            BlockProposal::None => None,
+        }
+    }
+}
+
 /// `GlobalState` handles all state of a Neptune node that is shared across its tasks.
 ///
 /// Some fields are only written to by certain tasks.
@@ -269,7 +355,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     /// The block proposal to which guessers contribute proof-of-work.
-    pub(crate) block_proposal: Option<Block>,
+    pub(crate) block_proposal: BlockProposal,
 
     // Only the mining task should write to this, anyone can read.
     pub mining: bool,
@@ -290,7 +376,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            block_proposal: None,
+            block_proposal: BlockProposal::default(),
             mining,
         }
     }
@@ -2170,7 +2256,7 @@ mod global_state_tests {
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, coinbase_expected_utxo) =
+        let (coinbase_transaction, coinbase_expected_utxos) =
             make_coinbase_transaction(&premine_receiver, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
@@ -2302,12 +2388,17 @@ mod global_state_tests {
         premine_receiver
             .set_new_self_mined_tip(
                 block_1.clone(),
-                vec![ExpectedUtxo::new(
-                    coinbase_expected_utxo.utxo,
-                    coinbase_expected_utxo.sender_randomness,
-                    genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )],
+                coinbase_expected_utxos
+                    .into_iter()
+                    .map(|expected_utxo| {
+                        ExpectedUtxo::new(
+                            expected_utxo.utxo,
+                            expected_utxo.sender_randomness,
+                            genesis_spending_key.privacy_preimage,
+                            UtxoNotifier::OwnMinerComposeBlock,
+                        )
+                    })
+                    .collect_vec(),
             )
             .await
             .unwrap();
