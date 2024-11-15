@@ -1492,10 +1492,16 @@ impl GlobalState {
 
         debug!("updated wallet state with data from new block");
 
-        // (Alan speaking:) I find this call confusing. What is it about the
-        // preceding code that generates mempool events and why aren't they
-        // handled there? What type of events do we expect to handle here?
-        // Some comments would be helpful please thanks.
+        // (Alan speaking:) IIuc, `mempool_events` contains `RemoveTx` events
+        // for transactions to be removed because they are unconfirmable with
+        // the new block (might be spent now), and transactions that are
+        // removed because we cannot upgrade them. What about transactions that
+        // are removed because the mempool does not have enough space for them?
+        // Also, what's the point of tracking `UpdateTxMutatorSet` events? The
+        // wallet does nothing in response.
+        //
+        // update wallet to drop anticipated UTXOs from transactions that were
+        // removed from the mempool
         self.wallet_state
             .handle_mempool_events(mempool_events)
             .await;

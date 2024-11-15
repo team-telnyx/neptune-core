@@ -579,7 +579,7 @@ impl Mempool {
     /// Since updating SingleProof-backed transactions takes a very long time,
     /// this proof generation does not happen in this method. Only a
     /// description of the jobs to be done is returned. It is then up to the
-    /// caller to ensure these updates happen. Returned mempool events does not
+    /// caller to ensure these updates happen. Returned mempool events do not
     /// include information about mutator set updates. That must be handled by
     /// the caller where the update jobs are executed.
     pub(super) async fn update_with_block_and_predecessor(
