@@ -1413,11 +1413,15 @@ impl GlobalState {
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         crate::macros::log_scope_duration!();
 
+        debug!("inside `GlobalState::set_new_tip_internal`.");
+
         // Apply the updates
         self.chain
             .archival_state_mut()
             .write_block_as_tip(&new_block)
             .await?;
+
+        debug!("wrote new block to block database as tip.");
 
         // update the mutator set with the UTXOs from this block
         self.chain
@@ -1425,6 +1429,8 @@ impl GlobalState {
             .update_mutator_set(&new_block)
             .await
             .expect("Updating mutator set must succeed");
+
+        debug!("updated archival mutator set.");
 
         for miner_reward_utxo_info in miner_reward_utxo_infos {
             // Notify wallet to expect the coinbase UTXO, as we mined this block
@@ -1438,6 +1444,8 @@ impl GlobalState {
                 .await;
         }
 
+        debug!("collected miner UTXOs (if any) from new block.");
+
         // Get parent of tip for mutator-set data needed for various updates. Parent of the
         // stored block will always exist since all blocks except the genesis block have a
         // parent, and the genesis block is considered code, not data, so the genesis block
@@ -1449,6 +1457,8 @@ impl GlobalState {
             .await
             .expect("Parent must exist when storing a new block");
 
+        debug!("read new block's parent from block database.");
+
         // Sanity check that must always be true for a valid block
         assert_eq!(
             tip_parent.hash(),
@@ -1456,6 +1466,8 @@ impl GlobalState {
             "Tip parent has must match indicated parent hash"
         );
         let previous_ms_accumulator = tip_parent.mutator_set_accumulator_after().clone();
+
+        debug!("got mutator accumulator state set after predecessor block (and thus, before new block).");
 
         // Update mempool with UTXOs from this block. This is done by
         // removing all transaction that became invalid/was mined by this
@@ -1471,15 +1483,28 @@ impl GlobalState {
             )
             .await;
 
+        debug!("updated mempool and got jobs back.");
+
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
             .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
             .await?;
+
+        debug!("updated wallet state with data from new block");
+
+        // (Alan speaking:) I find this call confusing. What is it about the
+        // preceding code that generates mempool events and why aren't they
+        // handled there? What type of events do we expect to handle here?
+        // Some comments would be helpful please thanks.
         self.wallet_state
             .handle_mempool_events(mempool_events)
             .await;
 
+        debug!("handled mempool events.");
+
         self.chain.light_state_mut().set_block(new_block);
+
+        debug!("set light state to new block.");
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip.
@@ -1487,6 +1512,9 @@ impl GlobalState {
 
         // Flush databases
         self.flush_databases().await?;
+
+        debug!("flushed databases.");
+        debug!("exiting `GlobalState::set_new_tip_internal`.");
 
         Ok(update_jobs)
     }
