@@ -536,6 +536,8 @@ impl MainLoopHandler {
             PeerTaskToMain::NewBlocks(blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
 
+                debug!("in `handle_peer_task_message` case `PeerTaskToMain::NewBlocks(_)`");
+
                 let last_block = blocks.last().unwrap().to_owned();
                 let update_jobs = {
                     // The peer tasks also check this condition, if block is more canonical than current
@@ -556,10 +558,14 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
+                    debug!("incoming block is more canonical; tell miner to pause");
+
                     // Ask miner to stop work until state update is completed
                     self.main_to_miner_tx
                         .send(MainToMiner::WaitForContinue)
                         .await?;
+
+                    debug!("told miner to pause");
 
                     // Get out of sync mode if needed
                     if global_state_mut.net.syncing {
@@ -574,6 +580,8 @@ impl MainLoopHandler {
                             self.main_to_miner_tx.send(MainToMiner::StopSyncing).await?;
                         }
                     }
+
+                    debug!("updated sync mode");
 
                     let mut update_jobs: Vec<UpdateMutatorSetDataJob> = vec![];
                     for new_block in blocks {
@@ -596,6 +604,9 @@ impl MainLoopHandler {
                         let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
                         update_jobs.extend(update_jobs_);
                     }
+
+                    debug!("compiled list of update jobs");
+                    debug!("finished case `PeerTaskToMain::NewBlocks(_)`");
 
                     update_jobs
                 };
