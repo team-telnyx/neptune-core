@@ -442,7 +442,7 @@ impl MainLoopHandler {
                 if !updated.is_confirmable_relative_to(
                     &state.chain.light_state().mutator_set_accumulator_after(),
                 ) {
-                    warn!("Updated transaction is not confirmable under new mutator set accumulator. Dropping.");
+                    error!("Updated transaction is not confirmable under new mutator set accumulator. Dropping.");
                     continue;
                 }
 
@@ -450,7 +450,7 @@ impl MainLoopHandler {
                 if let Some(tx) = state.mempool.get_mut(txid) {
                     *tx = updated.to_owned();
                 } else {
-                    warn!("Updated transaction which is no longer in mempool");
+                    error!("Updated transaction which is no longer in mempool");
                 }
             }
         }

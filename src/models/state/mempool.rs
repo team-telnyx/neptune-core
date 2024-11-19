@@ -476,7 +476,7 @@ impl Mempool {
                 error!("Transaction in mempool is invalid.");
                 continue;
             } else if !transaction.is_confirmable_relative_to(mutator_set_accumulator) {
-                warn!("Transaction in mempool is unconfirmable.");
+                error!("Transaction in mempool is unconfirmable.");
                 continue;
             } else {
                 valid_transactions.push(transaction);
