@@ -432,6 +432,20 @@ impl MainLoopHandler {
         {
             let mut state = self.global_state_lock.lock_guard_mut().await;
             for updated in updated_txs.iter() {
+                // sanity check: updated transactions are valid
+                if !updated.is_valid().await {
+                    error!("Updated transaction is not valid. Dropping.");
+                    continue;
+                }
+
+                // sanity check: updated transactions are confirmable
+                if !updated.is_confirmable_relative_to(
+                    &state.chain.light_state().mutator_set_accumulator_after(),
+                ) {
+                    warn!("Updated transaction is not confirmable under new mutator set accumulator. Dropping.");
+                    continue;
+                }
+
                 let txid = updated.kernel.txid();
                 if let Some(tx) = state.mempool.get_mut(txid) {
                     *tx = updated.to_owned();

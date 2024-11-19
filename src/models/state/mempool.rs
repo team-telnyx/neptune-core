@@ -59,6 +59,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
@@ -444,14 +445,53 @@ impl Mempool {
         self.tx_dictionary.is_empty()
     }
 
-    /// Return a vector with copies of the transactions, in descending order by fee
-    /// density. Set `only_single_proofs` to true to only return transactions
+    /// Return a vector with copies of the transactions, in descending order by
+    /// fee density.
+    ///
+    /// Set `only_single_proofs` to true to only return transactions
     /// that are backed by single proofs.
     ///
     /// Number of transactions returned can be capped by either size (measured
     /// in bytes), or by transaction count. The function guarantees that neither
     /// of the specified limits will be exceeded.
-    pub fn get_transactions_for_block(
+    //
+    // This function is async because of `transaction_copy.is_valid()`
+    pub(crate) async fn get_transactions_for_block(
+        &self,
+        remaining_storage: usize,
+        max_num_txs: Option<usize>,
+        only_single_proofs: bool,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+    ) -> Vec<Transaction> {
+        let transactions = self.get_transactions_for_block_internal(
+            remaining_storage,
+            max_num_txs,
+            only_single_proofs,
+        );
+
+        let mut valid_transactions = vec![];
+        for transaction in transactions {
+            // filter out invalid or unconfirmable transactions
+            if !transaction.is_valid().await {
+                error!("Transaction in mempool is invalid.");
+                continue;
+            } else if !transaction.is_confirmable_relative_to(mutator_set_accumulator) {
+                warn!("Transaction in mempool is unconfirmable.");
+                continue;
+            } else {
+                valid_transactions.push(transaction);
+            }
+        }
+
+        valid_transactions
+    }
+
+    /// Return a vector with copies of the transactions, in descending order by
+    /// fee density.
+    ///
+    /// Like [`Self::get_transactions_for_block`] but without filtering out
+    /// invalid or unconfirmable transactions.
+    fn get_transactions_for_block_internal(
         &self,
         mut remaining_storage: usize,
         max_num_txs: Option<usize>,
@@ -894,7 +934,8 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, None, false)
+        for curr_transaction in
+            mempool.get_transactions_for_block_internal(SIZE_20MB_IN_BYTES, None, false)
         {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
@@ -914,7 +955,7 @@ mod tests {
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
         for curr_transaction in
-            mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(num_txs), false)
+            mempool.get_transactions_for_block_internal(SIZE_20MB_IN_BYTES, Some(num_txs), false)
         {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
@@ -995,7 +1036,7 @@ mod tests {
             assert_eq!(
                 i,
                 mempool
-                    .get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(i), false)
+                    .get_transactions_for_block_internal(SIZE_20MB_IN_BYTES, Some(i), false)
                     .len()
             );
         }
@@ -1231,7 +1272,7 @@ mod tests {
         // Create a new block to verify that the non-mined transaction contains
         // updated and valid-again mutator set data
         let mut tx_by_alice_updated: Transaction =
-            mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
+            mempool.get_transactions_for_block_internal(usize::MAX, None, true)[0].clone();
         assert!(
             tx_by_alice_updated
                 .is_confirmable_relative_to(&block_2.mutator_set_accumulator_after()),
@@ -1262,7 +1303,8 @@ mod tests {
             previous_block = next_block;
         }
 
-        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
+        tx_by_alice_updated =
+            mempool.get_transactions_for_block_internal(usize::MAX, None, true)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
         let (cbtx, _eutxo) = make_coinbase_transaction(&alice, guesser_fraction, block_5_timestamp)
             .await
@@ -1391,11 +1433,11 @@ mod tests {
         // Verify that `get_transactions_for_block` handles single-proof
         // argument correctly.
         assert!(mempool
-            .get_transactions_for_block(usize::MAX, None, true)
+            .get_transactions_for_block_internal(usize::MAX, None, true)
             .len()
             .is_one());
         assert!(mempool
-            .get_transactions_for_block(usize::MAX, None, false)
+            .get_transactions_for_block_internal(usize::MAX, None, false)
             .len()
             .is_one());
     }
@@ -1466,12 +1508,11 @@ mod tests {
                 make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
-            let mempool_txs =
-                alice
-                    .lock_guard()
-                    .await
-                    .mempool
-                    .get_transactions_for_block(usize::MAX, None, true);
+            let mempool_txs = alice
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block_internal(usize::MAX, None, true);
             assert_eq!(
                 1,
                 mempool_txs.len(),
@@ -1508,7 +1549,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(usize::MAX, None, false)
+                .get_transactions_for_block_internal(usize::MAX, None, false)
                 .iter()
                 .all(|tx| tx.is_confirmable_relative_to(&block_1b.mutator_set_accumulator_after())),
             "All retained txs in the mempool must be confirmable relative to the new block.
@@ -1620,10 +1661,10 @@ mod tests {
         }
 
         assert!(mempool
-            .get_transactions_for_block(usize::MAX, None, true)
+            .get_transactions_for_block_internal(usize::MAX, None, true)
             .is_empty());
         assert!(!mempool
-            .get_transactions_for_block(usize::MAX, None, false)
+            .get_transactions_for_block_internal(usize::MAX, None, false)
             .is_empty());
     }
 

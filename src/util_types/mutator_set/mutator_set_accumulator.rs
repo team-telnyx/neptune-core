@@ -10,6 +10,7 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use tasm_lib::Digest;
+use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -181,6 +182,7 @@ impl MutatorSetAccumulator {
     pub fn can_remove(&self, removal_record: &RemovalRecord) -> bool {
         let mut have_absent_index = false;
         if !removal_record.validate(self) {
+            warn!("Removal record failed to validate.");
             return false;
         }
 
@@ -206,6 +208,10 @@ impl MutatorSetAccumulator {
                     break;
                 }
             }
+        }
+
+        if !have_absent_index {
+            warn!("None of the removal record's indices are absent from the SWBF, probably because the removal record was already removed.");
         }
 
         have_absent_index

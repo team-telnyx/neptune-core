@@ -260,6 +260,8 @@ fn guess_nonce_iteration(
     success
 }
 
+/// Create a coinbase transaction, *i.e.*, one that doesn't have any inputs but
+/// spends block subsidy instead.
 pub(crate) async fn make_coinbase_transaction(
     global_state_lock: &GlobalStateLock,
     guesser_block_subsidy_fraction: f64,
@@ -375,8 +377,9 @@ pub(crate) async fn make_coinbase_transaction(
 }
 
 /// Create the transaction that goes into the block template. The transaction is
-/// built from the mempool and from the coinbase transaction. Also returns the
-/// "sender randomness" used in the coinbase transaction.
+/// built from (copies of) transactions in the mempool and from the coinbase
+/// transaction. Also returns the "sender randomness" used in the coinbase
+/// transaction.
 pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
@@ -408,7 +411,9 @@ pub(crate) async fn create_block_transaction(
             block_capacity_for_transactions,
             Some(MAX_NUM_TXS_TO_MERGE),
             only_merge_single_proofs,
-        );
+            &predecessor_block.mutator_set_accumulator_after(),
+        )
+        .await;
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
@@ -634,8 +639,10 @@ pub(crate) async fn mine(
             new_composition = composer_rx => {
                 let (new_block_proposal, composer_utxos) = match new_composition {
                     Ok(k) => k,
-                    Err(e) => {warn!("composing task was cancelled prematurely. Got: {}", e);
-                    continue;}
+                    Err(e) => {
+                        warn!("composing task was cancelled prematurely. Got: {}", e);
+                        continue;
+                    }
                 };
                 to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
 

@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
+use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -335,15 +336,23 @@ impl RemovalRecord {
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
         if !self.has_required_authenticated_chunks(mutator_set) {
+            warn!("Removal record chunk dictionary does not have required chunks.");
             return false;
         }
 
         let swbfi_peaks = mutator_set.swbf_inactive.peaks();
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
-        self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
-            let leaf_digest = Hash::hash(chunk);
-            mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
-        })
+        let authentication_paths_are_valid =
+            self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
+                let leaf_digest = Hash::hash(chunk);
+                mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
+            });
+
+        if !authentication_paths_are_valid {
+            warn!("Removal record has some invalid authentication paths for chunks.");
+        }
+
+        authentication_paths_are_valid
     }
 
     /// Returns a hashmap from chunk index to chunk.
