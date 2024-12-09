@@ -797,6 +797,7 @@ mod test {
                 // assert that index lies in the range [0;N)
                 assert!(index < N);
             }
+
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -861,18 +862,20 @@ mod test {
                                 .collect_vec()
                         });
 
+                        let coinbase = |i: usize| {
+                            coinbase_and_index.and_then(|(coinbase, index)| {
+                                if index == i {
+                                    Some(coinbase)
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+
                         for i in 0..N {
-                            let maybe_coinbase =
-                                coinbase_and_index.and_then(|(coinbase, index)| {
-                                    if index == i {
-                                        Some(coinbase)
-                                    } else {
-                                        None
-                                    }
-                                });
                             Self::find_balanced_output_amounts_and_fee(
                                 input_amounts_per_tx[i],
-                                maybe_coinbase,
+                                coinbase(i),
                                 &mut output_utxo_amounts_per_tx[i],
                                 &mut fees[i],
                             );
@@ -881,10 +884,31 @@ mod test {
                         output_utxos
                             .iter_mut()
                             .zip(output_utxo_amounts_per_tx)
-                            .for_each(|(utxos, amounts)| {
-                                utxos.iter_mut().zip_eq(amounts).for_each(|(utxo, amount)| {
+                            .enumerate()
+                            .for_each(|(i, (utxos, amounts))| {
+                                // half_of_coinbase <= total_timelocked_output + half_of_fee
+                                let mut timelocked_cb_acc = NeptuneCoins::zero();
+                                let mut min_timelocked_cb = coinbase(i)
+                                    .unwrap_or(NeptuneCoins::zero())
+                                    .checked_sub(&fees[i])
+                                    .unwrap_or(NeptuneCoins::zero());
+                                min_timelocked_cb.div_two();
+                                println!("min_timelocked_cb: {min_timelocked_cb}");
+                                println!("timelocked_cb_acc: {timelocked_cb_acc}");
+                                for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
-                                })
+                                    if let Some(coinbase) = coinbase(i) {
+                                        if timelocked_cb_acc < min_timelocked_cb {
+                                            println!("Hi!");
+                                            let max_timestamp = *timestamps.iter().max().unwrap();
+                                            *utxo = utxo.clone().with_time_lock(
+                                                max_timestamp + COINBASE_TIME_LOCK_PERIOD,
+                                            );
+                                            timelocked_cb_acc = timelocked_cb_acc + amount;
+                                            println!("new timelocked_cb_acc: {timelocked_cb_acc}");
+                                        }
+                                    }
+                                }
                             });
 
                         let utxos_and_lock_scripts_and_witnesses = input_amountss
