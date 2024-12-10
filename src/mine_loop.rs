@@ -995,9 +995,9 @@ pub(crate) mod mine_loop_tests {
             );
 
             assert_eq!(
-                1,
+                2,
                 transaction_empty_mempool.kernel.outputs.len(),
-                "Coinbase transaction with empty mempool must have exactly one output"
+                "Coinbase transaction with empty mempool must have exactly two outputs"
             );
             assert!(
                 transaction_empty_mempool.kernel.inputs.is_empty(),
@@ -1034,9 +1034,9 @@ pub(crate) mod mine_loop_tests {
                     .unwrap()
             };
             assert_eq!(
-            3,
+            4,
             transaction_non_empty_mempool.kernel.outputs.len(),
-            "Transaction for block with non-empty mempool must contain coinbase output, send output, and change output"
+            "Transaction for block with non-empty mempool must contain two coinbase outputs, send output, and change output"
         );
             assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 

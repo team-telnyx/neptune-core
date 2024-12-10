@@ -277,6 +277,7 @@ impl ProofCollection {
                     .flat_map(|d| d.values())
                     .collect_vec(),
             );
+        debug!("collect_type_scripts_claim:\n{collect_type_scripts_claim:?}\n\n");
         let lock_script_claims = self
             .lock_script_hashes
             .iter()

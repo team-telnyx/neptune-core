@@ -689,6 +689,7 @@ mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -778,6 +779,7 @@ mod test {
         );
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
         let mut test_runner = TestRunner::deterministic();
@@ -790,6 +792,10 @@ mod test {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
+        println!(
+            "primitive_witness.type_scripts_and_witnesses.len(): {}",
+            primitive_witness.type_scripts_and_witnesses.len()
+        );
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
         let proof_collection = ProofCollection::produce(
