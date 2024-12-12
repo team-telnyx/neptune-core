@@ -760,6 +760,17 @@ impl GlobalState {
         Ok((transaction, maybe_change_output))
     }
 
+    pub(crate) fn create_fee_gobbler_transaction(
+        &self,
+        notify_medium: UtxoNotificationMedium,
+    ) -> Result<Option<Transaction>> {
+        // - Get most valuable proof collection from mempool
+        // - Create the negative-fee fee gobbler transaction
+        // - Upgrade that thing to SingleProof
+        // - Merge the two transactions
+        // - Return resulting tx to caller.
+    }
+
     /// creates a Transaction.
     ///
     /// This API provides the caller complete control over selection of inputs
