@@ -1,6 +1,7 @@
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
+use anyhow::bail;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
@@ -394,22 +395,38 @@ impl ArchivalState {
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
+        debug!("(deadlock-hunt) entering ArchivalState::get_block_from_record");
         // Get path of file for block
         let block_file_path: PathBuf = self
             .data_dir
             .block_file_path(block_record.file_location.file_index);
 
+        debug!("(deadlock-hunt): got block file path");
+
         // Open file as read-only
-        let block_file: tokio::fs::File = tokio::fs::OpenOptions::new()
+        let block_file: tokio::fs::File = match tokio::fs::OpenOptions::new()
             .read(true)
-            .open(block_file_path)
+            .open(block_file_path.clone())
             .await
-            .unwrap();
+        {
+            Ok(file) => {
+                debug!("(deadlock-hunt): opening block file was successful");
+                file
+            }
+            Err(e) => {
+                bail!(
+                    "Could not open block file {}: {e}",
+                    block_file_path.as_path().to_string_lossy()
+                );
+            }
+        };
+
+        debug!("(deadlock-hunt): spawning task to read the right data ...");
 
         // Read the file into memory, set the offset and length indicated in the block record
         // to avoid using more memory than needed
         // we use spawn_blocking to make the blocking mmap async-friendly.
-        tokio::task::spawn_blocking(move || {
+        let block_result = tokio::task::spawn_blocking(move || {
             let mmap = unsafe {
                 MmapOptions::new()
                     .offset(block_record.file_location.offset)
@@ -426,7 +443,11 @@ impl ArchivalState {
             };
             Ok(block)
         })
-        .await?
+        .await?;
+
+        debug!("(deadlock-hunt): got block result");
+
+        block_result
     }
 
     async fn tip_block_record(&self) -> Option<BlockRecord> {
@@ -662,24 +683,31 @@ impl ArchivalState {
 
     // Return the block with a given block digest, iff it's available in state somewhere.
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+        debug!("(deadlock-hunt) entering ArchivalState::get_block");
         let maybe_record: Option<BlockRecord> = self
             .block_index_db
             .get(BlockIndexKey::Block(block_digest))
             .await
             .map(|x| x.as_block_record());
+        debug!("(deadlock-hunt) got maybe block record (wrapped in option)");
         let record: BlockRecord = match maybe_record {
             Some(rec) => rec,
             None => {
                 if self.genesis_block.hash() == block_digest {
+                    debug!("(deadlock-hunt) option is none because block is genesis block; early-returning some genesis block.\nexiting ArchivalState::get_block");
                     return Ok(Some(*self.genesis_block.clone()));
                 } else {
+                    debug!("(deadlock-hunt) option is none because block is unknown; early-returning none.\nexiting ArchivalState::get_block");
                     return Ok(None);
                 }
             }
         };
+        debug!("(deadlock-hunt) got definite block record (unwrapped option)");
 
         // Fetch block from disk
         let block = self.get_block_from_block_record(record).await?;
+
+        debug!("(deadlock-hunt) got block; returning and \nexiting ArchivalState::get_block");
 
         Ok(Some(block))
     }
