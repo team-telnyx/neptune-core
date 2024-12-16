@@ -1923,7 +1923,7 @@ mod archival_state_tests {
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2165,7 +2165,7 @@ mod archival_state_tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(block_2.is_valid(&block_1, in_seven_months));
+        assert!(block_2.is_valid(&block_1, in_seven_months).await);
 
         // Expect incoming UTXOs
         {
