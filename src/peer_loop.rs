@@ -331,17 +331,14 @@ impl PeerLoopHandler {
         <S as TryStream>::Error: std::error::Error,
     {
         let parent_digest = received_block.kernel.header.prev_block_digest;
-        debug!("Fetching parent block");
+        debug!("Try ensure path: fetching parent block");
         let global_state = self.global_state_lock.lock_guard().await;
-        debug!("(deadlock-hunt) Acquired global state lock.");
         let parent_block = global_state
             .chain
             .archival_state()
             .get_block(parent_digest)
             .await?;
-        debug!("(deadlock-hunt) Got parent block.");
         drop(global_state);
-        debug!("(deadlock-hunt) Dropped global state lock.");
         debug!(
             "Completed parent block fetching from DB: {}",
             if parent_block.is_some() {

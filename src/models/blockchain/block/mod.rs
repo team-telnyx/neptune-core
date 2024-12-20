@@ -623,7 +623,6 @@ impl Block {
         //   f) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
-        debug!("(deadlock-hunt) testing block height");
         if previous_block.kernel.header.height.next() != self.kernel.header.height {
             warn!(
                 "Block height ({}) does not match previous height plus one ({})",
@@ -634,14 +633,12 @@ impl Block {
         }
 
         // 0.b) Block header points to previous block
-        debug!("(deadlock-hunt) testing block predecessor hash");
         if previous_block.hash() != self.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
 
         // 0.c) Block mmr updated correctly
-        debug!("(deadlock-hunt) testing block MMRA");
         let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
         mmra.append(previous_block.hash());
         if mmra != self.kernel.body.block_mmr_accumulator {
@@ -651,7 +648,6 @@ impl Block {
 
         // 0.d) Block timestamp is greater than (or equal to) timestamp of
         //      previous block plus minimum block time
-        debug!("(deadlock-hunt) testing block time against minimum");
         let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
         if previous_block.kernel.header.timestamp + minimum_block_time
             > self.kernel.header.timestamp
@@ -669,7 +665,6 @@ impl Block {
         }
 
         // 0.e) Target difficulty and cumulative proof-of-work were updated correctly
-        debug!("(deadlock-hunt) testing block difficuly update");
         let expected_difficulty = difficulty_control(
             self.header().timestamp,
             previous_block.header().timestamp,
@@ -685,7 +680,6 @@ impl Block {
             );
             return false;
         }
-        debug!("(deadlock-hunt) testing block cumulative pow");
         let expected_cumulative_proof_of_work =
             previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
@@ -699,7 +693,6 @@ impl Block {
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
-        debug!("(deadlock-hunt) testing block future-dating");
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::hours(2);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
@@ -711,7 +704,6 @@ impl Block {
         }
 
         // 1.a) Verify appendix contains required claims
-        debug!("(deadlock-hunt) testing block appendices");
         for required_claim in BlockAppendix::consensus_claims(self.body()) {
             if !self.appendix().contains(&required_claim) {
                 warn!(
@@ -723,7 +715,6 @@ impl Block {
         }
 
         // 1.b) Block proof is valid
-        debug!("(deadlock-hunt) testing block proof");
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             warn!("Can only verify block proofs, got {:?}", self.proof);
             return false;
@@ -734,7 +725,6 @@ impl Block {
         }
 
         // 1.c) Max block size is not exceeded
-        debug!("(deadlock-hunt) testing block size");
         if self.size() > MAX_BLOCK_SIZE {
             warn!(
                 "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
@@ -746,7 +736,6 @@ impl Block {
 
         // 2.a) Verify validity of removal records: That their MMR MPs match the SWBF, and
         // that at least one of their listed indices is absent.
-        debug!("(deadlock-hunt) testing block tx removal records");
         for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
             if !previous_block
                 .kernel
@@ -760,7 +749,6 @@ impl Block {
         }
 
         // 2.b) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
-        debug!("(deadlock-hunt) testing block tx removal record duplicates");
         let mut absolute_index_sets = self
             .kernel
             .body
@@ -782,7 +770,6 @@ impl Block {
         //       ii) the current block's set of transaction outputs and
         //       iii) the current block's set of transaction inputs,
         //     gives rise to the current block's mutator set
-        debug!("(deadlock-hunt) testing block mutator set update");
         let mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             [
@@ -808,7 +795,6 @@ impl Block {
         }
 
         // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp
-        debug!("(deadlock-hunt) testing block tx timestamp");
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             warn!(
                 "Transaction timestamp ({}) is is larger than that of block ({})",
@@ -819,7 +805,6 @@ impl Block {
 
         // 2.e) Verify that the coinbase claimed by the transaction does not
         //      exceed the block subsidy
-        debug!("(deadlock-hunt) testing block tx coinbase");
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
@@ -834,13 +819,10 @@ impl Block {
 
         // This check *should* already follow from SingleProof.
         // So we don't think this panic can ever be triggered.
-        debug!("(deadlock-hunt) testing block tx fee for negativity");
         assert!(
             !self.kernel.body.transaction_kernel.fee.is_negative(),
             "Tx fee cannot be negative"
         );
-
-        debug!("(deadlock-hunt) all block tests pass");
 
         true
     }
