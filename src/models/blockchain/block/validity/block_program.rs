@@ -16,6 +16,7 @@ use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 use tokio::task;
+use tracing::debug;
 
 use super::appendix_witness::AppendixWitness;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -45,9 +46,15 @@ impl BlockProgram {
     ) -> bool {
         let claim = Self::claim(block_body, appendix);
         let proof_clone = proof.clone();
-        task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof_clone))
-            .await
-            .expect("should be able to verify block proof in new tokio task")
+
+        debug!("** Spawning task to verify block proof ...");
+        let verdict =
+            task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof_clone))
+                .await
+                .expect("should be able to verify block proof in new tokio task");
+        debug!("** Task spawned to verify block proof completed; verdict: {verdict}.");
+
+        verdict
     }
 }
 
