@@ -1,11 +1,15 @@
+use std::path::Path;
 use std::sync::OnceLock;
 
+use itertools::Itertools;
+use rand::RngCore;
 use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
@@ -15,7 +19,8 @@ use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
-use tokio::task;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
 use super::appendix_witness::AppendixWitness;
@@ -44,10 +49,13 @@ impl BlockProgram {
         appendix: &BlockAppendix,
         proof: &Proof,
     ) -> bool {
+        let thread_identifier = rand::rngs::OsRng.next_u64();
         let claim = Self::claim(block_body, appendix);
         let proof_clone = proof.clone();
 
-        debug!("** Calling triton_vm::verify to verify block proof ...");
+        Self::save_claim_and_proof(&claim, &proof_clone, thread_identifier).await;
+
+        debug!("** Calling triton_vm::verify to verify block proof ... ({thread_identifier})");
         let verdict =
             // task::spawn_blocking(move ||
                 triton_vm::verify(Stark::default(), &claim, &proof_clone)
@@ -55,9 +63,45 @@ impl BlockProgram {
                 // .await
                 // .expect("should be able to verify block proof in new tokio task")
                 ;
-        debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
+        debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}. ({thread_identifier})");
 
         verdict
+    }
+
+    async fn save_claim_and_proof(claim: &Claim, proof: &Proof, thread_identifier: u64) {
+        let name = Tip5::hash(claim).to_hex();
+        let proof_filename = format!("{name}.proof");
+        let claim_filename = format!("{name}.claim");
+
+        let proof_data = proof
+            .0
+            .iter()
+            .copied()
+            .flat_map(|b| b.value().to_be_bytes())
+            .collect_vec();
+        let mut proof_file = File::create(Path::new(&proof_filename))
+            .await
+            .expect("cannot open file for writing");
+        proof_file
+            .write_all(&proof_data)
+            .await
+            .expect("cannot write to file");
+
+        let claim_data = claim
+            .encode()
+            .iter()
+            .copied()
+            .flat_map(|b| b.value().to_be_bytes())
+            .collect_vec();
+        let mut claim_file = File::create(Path::new(&claim_filename))
+            .await
+            .expect("cannot open file for writing");
+        claim_file
+            .write_all(&claim_data)
+            .await
+            .expect("cannot write to file");
+
+        debug!("** Wrote claim and proof to {name}.{{proof, claim}} ({thread_identifier})");
     }
 }
 
