@@ -49,9 +49,12 @@ impl BlockProgram {
 
         debug!("** Calling triton_vm::verify to verify block proof ...");
         let verdict =
-            task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof_clone))
-                .await
-                .expect("should be able to verify block proof in new tokio task");
+            // task::spawn_blocking(move ||
+                triton_vm::verify(Stark::default(), &claim, &proof_clone)
+            // )
+                // .await
+                // .expect("should be able to verify block proof in new tokio task")
+                ;
         debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
 
         verdict
