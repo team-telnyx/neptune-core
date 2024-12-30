@@ -56,6 +56,7 @@ impl BlockProgram {
         Self::save_claim_and_proof(&claim, &proof_clone, thread_identifier).await;
 
         debug!("** Calling triton_vm::verify to verify block proof ... ({thread_identifier})");
+        let tick = std::time::Instant::now();
         let verdict =
             // task::spawn_blocking(move ||
                 triton_vm::verify(Stark::default(), &claim, &proof_clone)
@@ -63,7 +64,8 @@ impl BlockProgram {
                 // .await
                 // .expect("should be able to verify block proof in new tokio task")
                 ;
-        debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}. ({thread_identifier})");
+        let tock = tick.elapsed();
+        debug!("** Call to triton_vm::verify to verify block proof completed in {tock:?}; verdict: {verdict}. ({thread_identifier})");
 
         verdict
     }
