@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use itertools::Itertools;
+use rand::thread_rng;
+use rand::RngCore;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -21,10 +23,36 @@ struct Args {
 async fn main() -> Result<()> {
     let Args { claim, proof } = Args::parse();
 
+    let mut rng = thread_rng();
+
     let claim = try_load_claim(claim).await?;
     let proof = try_load_proof(proof).await?;
 
-    println!("** Calling triton_vm::verify to verify proof ...");
+    for i in 0..100 {
+        println!("verifying claim/proof simultaneously {i} times ...");
+
+        let mut handles = vec![];
+        for _ in 0..i {
+            let claim_clone = claim.clone();
+            let proof_clone = proof.clone();
+            let thread_id = rng.next_u64();
+            handles.push(tokio::spawn(async move {
+                verify_claim_and_proof(claim_clone, proof_clone, thread_id).await;
+            }))
+        }
+
+        for handle in handles {
+            handle.await.expect("awaiting spawned task should succeed");
+        }
+
+        println!("simultaneous verification successful.\n");
+    }
+
+    Ok(())
+}
+
+async fn verify_claim_and_proof(claim: Claim, proof: Proof, thread_id: u64) {
+    println!("** Calling triton_vm::verify to verify proof ({thread_id}) ...");
     let tick = std::time::Instant::now();
     let verdict =
         // task::spawn_blocking(move ||
@@ -35,10 +63,8 @@ async fn main() -> Result<()> {
             ;
     let tock = tick.elapsed();
     println!(
-        "** Call to triton_vm::verify to verify proof completed in {tock:?}; verdict: {verdict}."
+        "** Call to triton_vm::verify to verify proof completed in {tock:?}; verdict: {verdict}. ({thread_id})"
     );
-
-    Ok(())
 }
 
 async fn try_load_claim(claim_file_name: String) -> Result<Claim> {
