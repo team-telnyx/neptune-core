@@ -1,5 +1,3 @@
-use std::hint::black_box;
-
 use anyhow::Result;
 use clap::Parser;
 use itertools::Itertools;
@@ -39,10 +37,8 @@ async fn main() -> Result<()> {
             let proof_clone = proof.clone();
             let thread_id = rng.next_u64();
             handles.push(tokio::spawn(async move {
-                let proofs = (0..(i * i)).map(|_| proof_clone.clone()).collect_vec();
                 verify_claim_and_proof(claim_clone, proof_clone, thread_id).await;
-                black_box(proofs);
-            }));
+            }))
         }
 
         for handle in handles {
