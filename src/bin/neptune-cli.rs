@@ -269,6 +269,9 @@ enum Command {
         #[clap(long, default_value_t=Network::default())]
         network: Network,
     },
+
+    /*** TRIGGER EVENTS ***/
+    BroadcastTipRequest,
 }
 
 #[derive(Debug, Parser)]
@@ -681,6 +684,12 @@ async fn main() -> Result<()> {
         Command::PruneAbandonedMonitoredUtxos => {
             let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx).await?;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
+        }
+
+        /*** TRIGGER EVENTS ***/
+        Command::BroadcastTipRequest => {
+            client.broadcast_tip_request(ctx).await?;
+            println!("Broadcasted `RequestBlockByHeight` to all peers.");
         }
     }
 

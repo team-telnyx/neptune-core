@@ -334,6 +334,9 @@ pub trait RPC {
 
     /// Gracious shutdown.
     async fn shutdown() -> bool;
+
+    /// Send `RequestBlockByHeight` message to all peers.
+    async fn broadcast_tip_request();
 }
 
 #[derive(Clone)]
@@ -1437,6 +1440,14 @@ impl RPC for NeptuneRPCServer {
             .collect_vec();
 
         mempool_transactions
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn broadcast_tip_request(self, _context: ::tarpc::context::Context) {
+        let _ = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::BroadcastTipRequest)
+            .await;
     }
 }
 

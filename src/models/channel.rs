@@ -106,6 +106,7 @@ pub(crate) enum MainToPeerTask {
     TransactionNotification(TransactionNotification), // Publish knowledge of a transaction
     Disconnect(SocketAddr),                       // Disconnect from a specific peer
     DisconnectAll(),                              // Disconnect from all peers
+    RequestBlockByHash(Digest),
 }
 
 impl MainToPeerTask {
@@ -122,6 +123,7 @@ impl MainToPeerTask {
             MainToPeerTask::Disconnect(_) => "disconnect",
             MainToPeerTask::DisconnectAll() => "disconnect all",
             MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
+            MainToPeerTask::RequestBlockByHash(_) => "request block by hash",
         }
         .to_string()
     }
@@ -176,4 +178,5 @@ pub(crate) enum RPCServerToMain {
     Shutdown,
     PauseMiner,
     RestartMiner,
+    BroadcastTipRequest,
 }

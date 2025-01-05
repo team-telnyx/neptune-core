@@ -1295,6 +1295,14 @@ impl PeerLoopHandler {
                 debug!("Sent PeerMessage::BlockProposalNotification");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            MainToPeerTask::RequestBlockByHash(digest) => {
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::RequestBlockByHash");
+
+                debug!("Sending PeerMessage::RequestBlockByHash");
+                peer.send(PeerMessage::BlockRequestByHash(digest)).await?;
+                debug!("Sent PeerMessage::RequestBlockByHash");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
         }
     }
 

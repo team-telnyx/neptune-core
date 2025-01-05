@@ -1573,6 +1573,21 @@ impl MainLoopHandler {
                 // shut down
                 Ok(true)
             }
+            RPCServerToMain::BroadcastTipRequest => {
+                info!("Received RPC request to broadcast tip request to all peers");
+                let tip_hash = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .hash();
+                let _ = self
+                    .main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::RequestBlockByHash(tip_hash));
+
+                Ok(false)
+            }
         }
     }
 
