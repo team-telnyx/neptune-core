@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
 
     println!("** Calling triton_vm::verify to verify proof ...");
     let tick = std::time::Instant::now();
+    triton_vm::profiler::start("verify");
     let verdict =
         // task::spawn_blocking(move ||
             triton_vm::verify(Stark::default(), &claim, &proof)
@@ -33,10 +34,13 @@ async fn main() -> Result<()> {
             // .await
             // .expect("should be able to verify proof in new tokio task")
             ;
+    let profile = triton_vm::profiler::finish();
     let tock = tick.elapsed();
     println!(
         "** Call to triton_vm::verify to verify proof completed in {tock:?}; verdict: {verdict}."
     );
+
+    println!("profile: {profile}");
 
     Ok(())
 }
