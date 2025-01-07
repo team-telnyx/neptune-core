@@ -11,26 +11,6 @@ pub fn main() -> Result<()> {
         .build()
         .expect("Could not create tokio runtime");
 
-    // synchronize rayon's threadpool with tokio's
-    // credit: https://users.rust-lang.org/t/can-rayon-and-tokio-cooperate/85022/3
-    rayon::ThreadPoolBuilder::new()
-        .spawn_handler(|thread| {
-            let rt = tokio::runtime::Handle::current();
-            let mut b = std::thread::Builder::new();
-            if let Some(name) = thread.name() {
-                b = b.name(name.to_owned());
-            }
-            if let Some(stack_size) = thread.stack_size() {
-                b = b.stack_size(stack_size);
-            }
-            b.spawn(move || {
-                let _guard = rt.enter();
-                thread.run()
-            })?;
-            Ok(())
-        })
-        .build_global()?;
-
     let res = tokio_runtime.block_on(async {
         // Fetch the CLI arguments
         let args: cli_args::Args = cli_args::Args::parse();
