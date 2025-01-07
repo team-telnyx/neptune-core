@@ -10,7 +10,6 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use tokio::select;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::math::digest::Digest;
@@ -78,50 +77,50 @@ async fn compose_block(
     }
 }
 
-/// Attempt to mine a valid block for the network
+/// Attempt to guess the nonce for a valid block for the network
+///
+/// This function wraps [`guess_worker`] in a loop that continues or not based
+/// on the return value of [`guess_worker`]. In this way, [`guess_worker`] is
+/// guaranteed to run until either
+///  - a valid nonce has been bound; or
+///  - the channel to `mine_loop` was closed.
 #[allow(clippy::too_many_arguments)]
 async fn guess_nonce(
     block: Block,
     previous_block: Block,
-    sender: oneshot::Sender<NewBlockFound>,
+    sender: tokio::sync::mpsc::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
     target_block_interval: Option<Timestamp>,
 ) {
-    // We wrap mining loop with spawn_blocking() because it is a
-    // very lengthy and CPU intensive task, which should execute
-    // on its own thread(s).
-    //
-    // Instead of spawn_blocking(), we could start a native OS
-    // thread which avoids using one from tokio's threadpool
-    // but that doesn't seem a concern for neptune-core.
-    // Also we would need to use a oneshot channel to avoid
-    // blocking while joining the thread.
-    // see: https://ryhl.io/blog/async-what-is-blocking/
-    //
-    // note: there is no async code inside the mining loop.
-    tokio::task::spawn_blocking(move || {
-        guess_worker(
-            block,
-            previous_block,
-            sender,
-            composer_utxos,
-            sleepy_guessing,
-            target_block_interval,
-        )
-    })
+    while guess_worker(
+        block.clone(),
+        previous_block.clone(),
+        sender.clone(),
+        composer_utxos.clone(),
+        sleepy_guessing,
+        target_block_interval,
+    )
     .await
-    .unwrap()
+    {}
 }
 
-fn guess_worker(
+/// A single iteration of the (outer) loop [`guess_nonce`].
+///
+/// This function runs [`guess_nonce_iteration_inner`] a fixed number of times,
+/// in quick succession, wrapped in a `spawn_blocking`, and sandwiched between
+/// bookkeeping operations (that are not repeated every iteration).
+///
+/// This function returns `true` if the outer loop should continue, and `false`
+/// otherwise.
+async fn guess_worker(
     mut input_block: Block,
     previous_block: Block,
-    sender: oneshot::Sender<NewBlockFound>,
+    sender: tokio::sync::mpsc::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
     target_block_interval: Option<Timestamp>,
-) {
+) -> bool {
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block.header().difficulty;
     let threshold = prev_difficulty.target();
@@ -139,49 +138,63 @@ fn guess_worker(
     // seeded with that seed. The `thread_rng()` object is dropped immediately.
     let mut rng = StdRng::from_seed(rand::thread_rng().gen());
 
-    // Mining loop
-    let mut guess_result;
-    loop {
-        guess_result = guess_nonce_iteration(
-            &mut input_block,
-            &previous_block,
-            &sender,
-            DifficultyInfo {
-                target_block_interval,
-                threshold,
-            },
-            sleepy_guessing,
-            &mut rng,
-        );
-        if !matches!(guess_result, GuessNonceResult::BlockNotFound) {
-            break;
+    // guessing loop
+    //
+    // We wrap guessing loop with spawn_blocking() because it is a
+    // very lengthy and CPU intensive task, which should execute
+    // on its own thread(s).
+    //
+    // Instead of spawn_blocking(), we could start a native OS
+    // thread which avoids using one from tokio's threadpool
+    // but that doesn't seem a concern for neptune-core.
+    // Also we would need to use a oneshot channel to avoid
+    // blocking while joining the thread.
+    // see: https://ryhl.io/blog/async-what-is-blocking/
+    //
+    // note: there is no async code inside the guessing loop.
+    const NUM_GUESSING_ITERATIONS: usize = 10_000;
+    let guess_result = tokio::task::spawn_blocking(move || {
+        let mut result = GuessNonceResult::BlockNotFound;
+        'mine_loop: for _ in 0..NUM_GUESSING_ITERATIONS {
+            result = guess_nonce_iteration_inner(
+                &mut input_block,
+                &previous_block,
+                DifficultyInfo {
+                    target_block_interval,
+                    threshold,
+                },
+                sleepy_guessing,
+                &mut rng,
+            );
+            if !matches!(result, GuessNonceResult::BlockNotFound) {
+                break 'mine_loop;
+            }
         }
-    }
+        result
+    })
+    .await
+    .unwrap();
     // If the sender is cancelled, the parent to this thread most
     // likely received a new block, and this thread hasn't been stopped
     // yet by the operating system, although the call to abort this
     // thread *has* been made.
-    if sender.is_canceled() {
+    if sender.is_closed() {
         info!(
             "Abandoning mining of current block with height {}",
-            input_block.kernel.header.height
+            input_block_height
         );
-        return;
+        return false;
     }
 
     let (block, nonce_preimage) = match guess_result {
-        GuessNonceResult::Cancelled => {
-            info!(
-                "Abandoning mining of current block with height {}",
-                input_block_height,
-            );
-            return;
-        }
         GuessNonceResult::BlockFound {
             block,
             nonce_preimage,
         } => (block, nonce_preimage),
-        _ => unreachable!(),
+        GuessNonceResult::BlockNotFound => {
+            // repeat
+            return true;
+        }
     };
 
     let nonce = block.kernel.header.nonce;
@@ -220,9 +233,13 @@ Difficulty threshold: {threshold}
         guesser_fee_utxo_infos,
     };
 
-    sender
-        .send(new_block_found)
-        .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
+    match sender.send(new_block_found).await {
+        Ok(_) => false,
+        Err(e) => {
+            warn!("Receiver in mining loop closed prematurely; reason: {e}");
+            false
+        }
+    }
 }
 
 pub(crate) struct DifficultyInfo {
@@ -231,7 +248,6 @@ pub(crate) struct DifficultyInfo {
 }
 
 enum GuessNonceResult {
-    Cancelled,
     BlockFound {
         nonce_preimage: Digest,
         block: Box<Block>,
@@ -240,27 +256,14 @@ enum GuessNonceResult {
 }
 
 /// Run a single iteration of the mining loop.
-///
-/// Returns (found: bool, cancelled: bool).
-///   found is true if a valid block is found
-///   cancelled is true if the task is terminated.
 #[inline]
-fn guess_nonce_iteration(
+fn guess_nonce_iteration_inner(
     block: &mut Block,
     previous_block: &Block,
-    sender: &oneshot::Sender<NewBlockFound>,
     difficulty_info: DifficultyInfo,
     sleepy_guessing: bool,
     rng: &mut rand::rngs::StdRng,
 ) -> GuessNonceResult {
-    if sender.is_canceled() {
-        info!(
-            "Abandoning mining of current block with height {}",
-            block.kernel.header.height
-        );
-        return GuessNonceResult::Cancelled;
-    }
-
     // Modify the nonce in the block header. In order to collect the guesser
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
     let nonce_preimage: Digest = rng.gen();
@@ -485,8 +488,8 @@ pub(crate) async fn create_block_transaction(
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub(crate) async fn mine(
-    mut from_main: mpsc::Receiver<MainToMiner>,
-    to_main: mpsc::Sender<MinerToMain>,
+    mut from_main: tokio::sync::mpsc::Receiver<MainToMiner>,
+    to_main: tokio::sync::mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
     mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
@@ -500,7 +503,7 @@ pub(crate) async fn mine(
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
     loop {
-        let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+        let (guesser_tx, mut guesser_rx) = tokio::sync::mpsc::channel::<NewBlockFound>(1);
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
         global_state_lock.set_mining_status_to_inactive().await;
 
@@ -508,7 +511,7 @@ pub(crate) async fn mine(
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
-        let guesser_task: Option<JoinHandle<()>> = if !wait_for_confirmation
+        let guesser_tasks: Vec<JoinHandle<()>> = if !wait_for_confirmation
             && guess
             && maybe_proposal.is_some()
             && !is_syncing
@@ -522,29 +525,31 @@ pub(crate) async fn mine(
                 .set_mining_status_to_guessing(proposal)
                 .await;
 
-            let guesser_task = guess_nonce(
-                proposal.to_owned(),
-                latest_block.clone(),
-                guesser_tx,
-                composer_utxos,
-                cli_args.sleepy_guessing,
-                None, // using default TARGET_BLOCK_INTERVAL
-            );
+            (0..tokio::runtime::Handle::current().metrics().num_workers())
+                .map(|i| {
+                    let guesser_task = guess_nonce(
+                        proposal.to_owned(),
+                        latest_block.clone(),
+                        guesser_tx.clone(),
+                        composer_utxos.clone(),
+                        cli_args.sleepy_guessing,
+                        None, // using default TARGET_BLOCK_INTERVAL
+                    );
 
-            Some(
-                tokio::task::Builder::new()
-                    .name("guesser")
-                    .spawn(guesser_task)
-                    .expect("Failed to spawn guesser task"),
-            )
+                    tokio::task::Builder::new()
+                        .name(&format!("guesser {i}"))
+                        .spawn(guesser_task)
+                        .expect("Failed to spawn guesser task")
+                })
+                .collect()
         } else {
-            None
+            vec![]
         };
 
         let compose = cli_args.compose;
         let mut composer_task = if !wait_for_confirmation
             && compose
-            && guesser_task.is_none()
+            && guesser_tasks.is_empty()
             && !is_syncing
             && !pause_mine
         {
@@ -585,8 +590,10 @@ pub(crate) async fn mine(
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
 
-                        if let Some(gt) = guesser_task {
-                            gt.abort();
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
+                                gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -597,8 +604,10 @@ pub(crate) async fn mine(
                         break;
                     }
                     MainToMiner::NewBlock(block) => {
-                        if let Some(gt) = guesser_task {
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
                             gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -610,8 +619,10 @@ pub(crate) async fn mine(
                         info!("Miner task received {} block height {}", cli_args.network, latest_block.kernel.header.height);
                     }
                     MainToMiner::NewBlockProposal => {
-                        if let Some(gt) = guesser_task {
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
                             gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -622,8 +633,10 @@ pub(crate) async fn mine(
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        if let Some(gt) = guesser_task {
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
                             gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -639,8 +652,10 @@ pub(crate) async fn mine(
                     MainToMiner::StopMining => {
                         pause_mine = true;
 
-                        if let Some(gt) = guesser_task {
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
                             gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -662,8 +677,10 @@ pub(crate) async fn mine(
                         // variable, because it reflects the logical on/off
                         // of mining, which syncing can temporarily override
                         // but not alter the setting.
-                        if let Some(gt) = guesser_task {
+                        if !guesser_tasks.is_empty() {
+                            guesser_tasks.iter().for_each(|gt|{
                             gt.abort();
+                            });
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
@@ -683,36 +700,36 @@ pub(crate) async fn mine(
 
                 wait_for_confirmation = true;
             }
-            new_block = guesser_rx => {
-                let new_block_found = match new_block {
-                    Ok(res) => res,
-                    Err(err) => {
-                        warn!("Mining task was cancelled prematurely. Got: {}", err);
+            maybe_new_block = guesser_rx.recv() => {
+                let new_block = match maybe_new_block {
+                    Some(res) => res,
+                    None => {
+                        warn!("Mining task was cancelled prematurely; reason unknown.");
                         continue;
                     }
                 };
 
-                debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
+                debug!("Worker task reports new block of height {}", new_block.block.kernel.header.height);
 
                 // Sanity check, remove for more efficient mining.
                 // The below PoW check could fail due to race conditions. So we don't panic,
                 // we only ignore what the worker task sent us.
-                if !new_block_found.block.has_proof_of_work(&latest_block) {
+                if !new_block.block.has_proof_of_work(&latest_block) {
                     error!("Own mined block did not have valid PoW Discarding.");
                     continue;
                 }
 
-                if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
+                if !new_block.block.is_valid(&latest_block, Timestamp::now()).await {
                     // Block could be invalid if for instance the proof and proof-of-work
                     // took less time than the minimum block time.
                     error!("Found block with valid proof-of-work but block is invalid.");
                     continue;
                 }
 
-                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
+                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block.block.kernel.header.height, new_block.block.hash());
 
-                latest_block = *new_block_found.block.to_owned();
-                to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
+                latest_block = *new_block.block.to_owned();
+                to_main.send(MinerToMain::NewBlockFound(new_block)).await?;
 
                 wait_for_confirmation = true;
             }
@@ -819,23 +836,23 @@ pub(crate) mod mine_loop_tests {
         );
         let threshold = previous_block.header().difficulty.target();
 
-        let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
-
-        let num_iterations = 10000;
+        let num_iterations = 10_000;
         let tick = std::time::SystemTime::now();
-        for _ in 0..num_iterations {
-            guess_nonce_iteration(
-                &mut block,
-                &previous_block,
-                &worker_task_tx,
-                DifficultyInfo {
-                    target_block_interval,
-                    threshold,
-                },
-                sleepy_guessing,
-                &mut rng,
-            );
-        }
+        let _ = tokio::task::spawn_blocking(move || {
+            for _ in 0..num_iterations {
+                guess_nonce_iteration_inner(
+                    &mut block,
+                    &previous_block,
+                    DifficultyInfo {
+                        target_block_interval,
+                        threshold,
+                    },
+                    sleepy_guessing,
+                    &mut rng,
+                );
+            }
+        })
+        .await;
         let time_spent_mining = tick.elapsed().unwrap();
 
         (num_iterations as f64) / (time_spent_mining.as_millis() as f64)
@@ -1087,7 +1104,7 @@ pub(crate) mod mine_loop_tests {
         .await;
         let tip_block_orig = Block::genesis_block(network);
         let launch_date = tip_block_orig.header().timestamp;
-        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let (worker_task_tx, mut worker_task_rx) = tokio::sync::mpsc::channel::<NewBlockFound>(1);
 
         let (transaction, coinbase_utxo_info) =
             make_coinbase_transaction(&tip_block_orig, &global_state_lock, 0f64, launch_date)
@@ -1111,9 +1128,10 @@ pub(crate) mod mine_loop_tests {
             coinbase_utxo_info,
             sleepy_guessing,
             None,
-        );
+        )
+        .await;
 
-        let mined_block_info = worker_task_rx.await.unwrap();
+        let mined_block_info = worker_task_rx.recv().await.unwrap();
 
         assert!(mined_block_info.block.has_proof_of_work(&tip_block_orig));
     }
@@ -1138,7 +1156,7 @@ pub(crate) mod mine_loop_tests {
             cli_args::Args::default(),
         )
         .await;
-        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let (worker_task_tx, mut worker_task_rx) = tokio::sync::mpsc::channel::<NewBlockFound>(1);
 
         let tip_block_orig = global_state_lock
             .lock_guard()
@@ -1178,9 +1196,10 @@ pub(crate) mod mine_loop_tests {
             coinbase_utxo_info,
             sleepy_guessing,
             None,
-        );
+        )
+        .await;
 
-        let mined_block_info = worker_task_rx.await.unwrap();
+        let mined_block_info = worker_task_rx.recv().await.unwrap();
 
         let block_timestamp = mined_block_info.block.kernel.header.timestamp;
 
@@ -1320,19 +1339,22 @@ pub(crate) mod mine_loop_tests {
                 Some(target_block_interval),
             );
 
-            let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+            let (worker_task_tx, mut worker_task_rx) =
+                tokio::sync::mpsc::channel::<NewBlockFound>(1);
             let height = block.header().height;
 
-            guess_worker(
-                block,
+            while guess_worker(
+                block.clone(),
                 prev_block.clone(),
-                worker_task_tx,
-                composer_utxos,
+                worker_task_tx.clone(),
+                composer_utxos.clone(),
                 sleepy_guessing,
                 Some(target_block_interval),
-            );
+            )
+            .await
+            {}
 
-            let mined_block_info = worker_task_rx.await.unwrap();
+            let mined_block_info = worker_task_rx.recv().await.unwrap();
 
             // note: this assertion often fails prior to fix for #154.
             // Also note that `is_valid` is a wrapper around `is_valid_internal`
