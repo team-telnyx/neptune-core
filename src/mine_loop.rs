@@ -9,7 +9,6 @@ use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rayon::iter::ParallelIterator;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -116,7 +115,7 @@ async fn guess_nonce(
 }
 
 fn guess_worker(
-    input_block: Block,
+    mut input_block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
@@ -135,30 +134,40 @@ fn guess_worker(
         threshold
     );
 
-    // note: this article discusses rayon strategies for mining.
-    // https://www.innoq.com/en/blog/2018/06/blockchain-mining-embarrassingly-parallel/
-    //
-    // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
-    // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let guess_result = rayon::iter::repeat(0)
-        .map_init(
-            || (&previous_block, input_block.clone(), rand::thread_rng()), // get the thread-local RNG
-            |(prev, block, rng), _x| {
-                guess_nonce_iteration(
-                    block,
-                    prev,
-                    &sender,
-                    DifficultyInfo {
-                        target_block_interval,
-                        threshold,
-                    },
-                    sleepy_guessing,
-                    rng,
-                )
+    // The RNG used to sample nonces must be thread-safe, which `thread_rng()` is not.
+    // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
+    // seeded with that seed. The `thread_rng()` object is dropped immediately.
+    let mut rng = StdRng::from_seed(rand::thread_rng().gen());
+
+    // Mining loop
+    let mut guess_result;
+    loop {
+        guess_result = guess_nonce_iteration(
+            &mut input_block,
+            &previous_block,
+            &sender,
+            DifficultyInfo {
+                target_block_interval,
+                threshold,
             },
-        )
-        .find_any(|r| !r.block_not_found())
-        .unwrap();
+            sleepy_guessing,
+            &mut rng,
+        );
+        if !matches!(guess_result, GuessNonceResult::BlockNotFound) {
+            break;
+        }
+    }
+    // If the sender is cancelled, the parent to this thread most
+    // likely received a new block, and this thread hasn't been stopped
+    // yet by the operating system, although the call to abort this
+    // thread *has* been made.
+    if sender.is_canceled() {
+        info!(
+            "Abandoning mining of current block with height {}",
+            input_block.kernel.header.height
+        );
+        return;
+    }
 
     let (block, nonce_preimage) = match guess_result {
         GuessNonceResult::Cancelled => {
@@ -229,11 +238,6 @@ enum GuessNonceResult {
     },
     BlockNotFound,
 }
-impl GuessNonceResult {
-    fn block_not_found(&self) -> bool {
-        matches!(self, Self::BlockNotFound)
-    }
-}
 
 /// Run a single iteration of the mining loop.
 ///
@@ -247,7 +251,7 @@ fn guess_nonce_iteration(
     sender: &oneshot::Sender<NewBlockFound>,
     difficulty_info: DifficultyInfo,
     sleepy_guessing: bool,
-    rng: &mut rand::rngs::ThreadRng,
+    rng: &mut rand::rngs::StdRng,
 ) -> GuessNonceResult {
     if sender.is_canceled() {
         info!(
@@ -775,7 +779,7 @@ pub(crate) mod mine_loop_tests {
         sleepy_guessing: bool,
         num_outputs: usize,
     ) -> f64 {
-        let mut rng = thread_rng();
+        let mut rng = StdRng::from_rng(thread_rng()).unwrap();
         let network = Network::RegTest;
         let global_state_lock = mock_genesis_global_state(
             network,
