@@ -212,6 +212,3 @@ harness = false
 [[bench]]
 name = "consensus"
 harness = false
-
-[patch.crates-io]
-tasm-lib = { git = 'https://github.com/TritonVM/tasm-lib.git', rev = '02d9d0deb46b8e6dd17d4dc8113051619d509997' }
