@@ -1,3 +1,4 @@
+use std::cmp;
 use std::cmp::max;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
+use rayon::ThreadPoolBuilder;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -140,25 +142,33 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let guess_result = rayon::iter::repeat(0)
-        .map_init(
-            || (&previous_block, input_block.clone(), rand::thread_rng()), // get the thread-local RNG
-            |(prev, block, rng), _x| {
-                guess_nonce_iteration(
-                    block,
-                    prev,
-                    &sender,
-                    DifficultyInfo {
-                        target_block_interval,
-                        threshold,
-                    },
-                    sleepy_guessing,
-                    rng,
-                )
-            },
-        )
-        .find_any(|r| !r.block_not_found())
+    let rayon_threads_available = rayon::current_num_threads();
+    let threads_to_use = cmp::max(1, rayon_threads_available.saturating_sub(2));
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(threads_to_use)
+        .build()
         .unwrap();
+    let guess_result = pool.install(|| {
+        rayon::iter::repeat(0)
+            .map_init(
+                || (&previous_block, input_block.clone(), rand::thread_rng()),
+                |(prev, block, rng), _x| {
+                    guess_nonce_iteration(
+                        block,
+                        prev,
+                        &sender,
+                        DifficultyInfo {
+                            target_block_interval,
+                            threshold,
+                        },
+                        sleepy_guessing,
+                        rng,
+                    )
+                },
+            )
+            .find_any(|r| !r.block_not_found())
+            .unwrap()
+    });
 
     let (block, nonce_preimage) = match guess_result {
         GuessNonceResult::Cancelled => {
