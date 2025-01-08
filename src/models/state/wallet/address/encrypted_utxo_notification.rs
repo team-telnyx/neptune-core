@@ -73,10 +73,12 @@ impl EncryptedUtxoNotification {
     pub(crate) fn into_bech32m(self, network: Network) -> String {
         let hrp = Self::get_hrp(network);
         let message = self.into_message();
+        #[allow(clippy::literal_string_with_formatting_args)]
         let payload = bincode::serialize(&message)
             .expect("Serialization shouldn't fail. Message was: {message:?}");
         let payload = payload.to_base32();
         let variant = bech32::Variant::Bech32m;
+        #[allow(clippy::literal_string_with_formatting_args)]
         bech32::encode(&hrp, payload, variant).expect(
             "bech32 encoding shouldn't fail. Arguments were:\n\n{hrp}\n\n{payload:?}\n\n{variant:?}",
         )

@@ -154,12 +154,14 @@ impl WalletSecret {
         let outgoing_randomness_file: PathBuf =
             Self::wallet_outgoing_secrets_path(wallet_directory_path);
         if !outgoing_randomness_file.exists() {
+            #[allow(clippy::literal_string_with_formatting_args)]
             Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).expect(
                 "Create file for outgoing randomness must succeed. Attempted to create file: {outgoing_randomness_file}",
             );
         }
 
         let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
+        #[allow(clippy::literal_string_with_formatting_args)]
         if !incoming_randomness_file.exists() {
             Self::create_empty_wallet_randomness_file(&incoming_randomness_file).expect("Create file for outgoing randomness must succeed. Attempted to create file: {incoming_randomness_file}");
         }
