@@ -1,4 +1,3 @@
-use std::cmp;
 use std::cmp::max;
 use std::time::Duration;
 
@@ -143,12 +142,8 @@ fn guess_worker(
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     let rayon_threads_available = rayon::current_num_threads();
-    if rayon_threads_available < 2 {
-        error!("Cannot guess when less than two threads are available to rayon");
-        return;
-    }
 
-    let threads_to_use = cmp::max(1, rayon_threads_available.saturating_sub(2));
+    let threads_to_use = rayon_threads_available;
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
         .build()
