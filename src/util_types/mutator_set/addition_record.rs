@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -32,6 +34,12 @@ impl AdditionRecord {
         Self {
             canonical_commitment,
         }
+    }
+}
+
+impl Display for AdditionRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.canonical_commitment)
     }
 }
 
