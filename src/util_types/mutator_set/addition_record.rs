@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use serde::Deserialize;
@@ -19,9 +20,9 @@ use crate::prelude::twenty_first;
     Hash,
     GetSize,
     BFieldCodec,
-    Arbitrary,
     TasmObject,
 )]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
 }
