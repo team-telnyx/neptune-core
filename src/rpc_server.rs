@@ -975,7 +975,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .get_wallet_status_for_tip()
             .await;
-        amount <= wallet_status.synced_unspent_available_amount(now)
+        amount <= wallet_status.synced_unspent_liquid_amount(now)
     }
 
     // documented in trait. do not add doc-comment.
@@ -989,7 +989,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .get_wallet_status_for_tip()
             .await;
-        wallet_status.synced_unspent_available_amount(now)
+        wallet_status.synced_unspent_liquid_amount(now)
     }
 
     // documented in trait. do not add doc-comment.
@@ -1184,7 +1184,7 @@ impl RPC for NeptuneRPCServer {
 
         let available_balance = {
             log_slow_scope!(fn_name!() + "::synced_unspent_available_amount()");
-            wallet_status.synced_unspent_available_amount(now)
+            wallet_status.synced_unspent_liquid_amount(now)
         };
         let timelocked_balance = {
             log_slow_scope!(fn_name!() + "::synced_unspent_timelocked_amount()");
