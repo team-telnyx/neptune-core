@@ -425,7 +425,6 @@ pub mod test {
             );
             return vec![];
         };
-        #[allow(clippy::literal_string_with_formatting_args)]
         file_as_string
             .lines()
             .map(|s| {

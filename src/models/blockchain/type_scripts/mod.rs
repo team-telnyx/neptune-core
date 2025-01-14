@@ -82,6 +82,7 @@ impl TypeScriptAndWitness {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,

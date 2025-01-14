@@ -165,7 +165,6 @@ impl WalletSecret {
         }
 
         let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
-        #[allow(clippy::literal_string_with_formatting_args)]
         if !incoming_randomness_file.exists() {
             Self::create_empty_wallet_randomness_file(&incoming_randomness_file).unwrap_or_else(
                 |_| {
