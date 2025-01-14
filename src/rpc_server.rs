@@ -1419,7 +1419,7 @@ impl RPC for NeptuneRPCServer {
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
         let prune_count_res = global_state_mut
-            .prune_abandoned_monitored_utxos(DEFAULT_MUTXO_PRUNE_DEPTH)
+            .handle_reorganized_monitored_utxos(DEFAULT_MUTXO_PRUNE_DEPTH)
             .await;
 
         global_state_mut

@@ -234,13 +234,13 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.resync_membership_proofs().await
     }
 
-    pub async fn prune_abandoned_monitored_utxos(
+    pub async fn handle_reorganized_monitored_utxos(
         &mut self,
         block_depth_threshhold: usize,
     ) -> Result<usize> {
         self.lock_guard_mut()
             .await
-            .prune_abandoned_monitored_utxos(block_depth_threshhold)
+            .handle_reorganized_monitored_utxos(block_depth_threshhold)
             .await
     }
 
@@ -1188,14 +1188,17 @@ impl GlobalState {
         Ok(())
     }
 
+    /// Update the wallet state to account for reorganizations.
+    ///
     /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
-    /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
-    /// abandoned chains of unknown depth.
+    /// `block_depth_threshhold`.
     /// Returns the number of monitored UTXOs that were marked as abandoned.
+    ///
+    /// Marks all transactions that were spent in abandoned blocks as unspent.
     ///
     /// Locking:
     ///  * acquires `monitored_utxos` lock for write
-    pub async fn prune_abandoned_monitored_utxos(
+    pub async fn handle_reorganized_monitored_utxos(
         &mut self,
         block_depth_threshhold: usize,
     ) -> Result<usize> {
@@ -1220,6 +1223,23 @@ impl GlobalState {
         let mut removed_count = 0;
         for i in 0..monitored_utxos.len().await {
             let mut mutxo = monitored_utxos.get(i).await;
+
+            // Was tx spent in a block that's now abandoned?
+            let unmark_as_spent = match mutxo.spent_in_block {
+                Some((block_digest, _, _)) => {
+                    !self
+                        .chain
+                        .archival_state()
+                        .block_belongs_to_canonical_chain(block_digest)
+                        .await
+                }
+                None => false,
+            };
+            if unmark_as_spent {
+                debug!("Marking utxo as unspent");
+                mutxo.unmark_as_spent();
+                monitored_utxos.set(i, mutxo.clone()).await;
+            }
 
             // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             //    once the spending block is buried sufficiently deep

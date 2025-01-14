@@ -2157,7 +2157,7 @@ mod tests {
             bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at block 3b"
         );
-        let prune_count_3b = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
+        let prune_count_3b = bob.handle_reorganized_monitored_utxos(10).await.unwrap();
         assert!(prune_count_3b.is_zero());
 
         // Mine eight blocks on top of 3b, update states
@@ -2170,7 +2170,7 @@ mod tests {
             latest_block = new_block;
         }
 
-        let prune_count_11 = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
+        let prune_count_11 = bob.handle_reorganized_monitored_utxos(10).await.unwrap();
         assert!(prune_count_11.is_zero());
         assert!(
             bob.wallet_state
@@ -2201,7 +2201,7 @@ mod tests {
                 .all(|x| x.abandoned_at.is_none()),
             "MUTXO must *not* be marked as abandoned at height 12, prior to pruning"
         );
-        let prune_count_12 = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
+        let prune_count_12 = bob.handle_reorganized_monitored_utxos(10).await.unwrap();
         assert_eq!(2, prune_count_12);
 
         for i in 0..=1 {

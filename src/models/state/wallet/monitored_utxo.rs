@@ -157,6 +157,10 @@ impl MonitoredUtxo {
         ));
     }
 
+    pub(crate) fn unmark_as_spent(&mut self) {
+        self.spent_in_block = None;
+    }
+
     /// Get the most recent (block hash, membership proof) entry in the database,
     /// if any.
     pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof)> {
