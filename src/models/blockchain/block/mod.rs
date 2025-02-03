@@ -174,6 +174,13 @@ impl PartialEq for Block {
 }
 impl Eq for Block {}
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Display)]
+pub(crate) enum BlockInvalid {
+    YourMom,
+    YourDad,
+    YourUgly,
+}
+
 impl Block {
     /// Create a block template with an invalid block proof, from a block
     /// primitive witness.
@@ -598,7 +605,11 @@ impl Block {
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
-    pub(crate) async fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
+    pub(crate) async fn is_valid(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+    ) -> Result<(), BlockInvalid> {
         self.is_valid_internal(previous_block, now, None, None)
             .await
     }
@@ -612,7 +623,7 @@ impl Block {
         now: Timestamp,
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
-    ) -> bool {
+    ) -> Result<(), BlockInvalid> {
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
 
