@@ -594,7 +594,10 @@ pub(crate) async fn create_block_transaction_from(
             job_options.clone(),
         )
         .await
-        .expect("Must be able to merge transactions in mining context");
+        .unwrap_or_else(|e| {
+            error!("Must be able to merge transactions in mining context; but got error: {e:?}");
+            panic!("Must be able to merge transactions in mining context; but got error: {e:?}")
+        });
     }
 
     let own_expected_utxos = composer_txos
