@@ -246,16 +246,22 @@ fn guess_worker(
         .unwrap();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(
-                    kernel_auth_path,
-                    threshold,
-                    sleepy_guessing,
-                    rng,
-                    header_auth_path,
-                    &sender,
-                )
-            })
+            .map_init(
+                || {
+                    let mut rng = rand::rng();
+                    rng.random()
+                },
+                |initial_nonce, _i| {
+                    guess_nonce_iteration(
+                        kernel_auth_path,
+                        threshold,
+                        sleepy_guessing,
+                        initial_nonce,
+                        header_auth_path,
+                        &sender,
+                    )
+                },
+            )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -350,31 +356,35 @@ fn guess_nonce_iteration(
     kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
     threshold: Digest,
     sleepy_guessing: bool,
-    rng: &mut rand::rngs::ThreadRng,
+    nonce: &mut Digest,
     bh_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
-    if sleepy_guessing {
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // if sleepy_guessing {
+    //     std::thread::sleep(Duration::from_millis(100));
+    // }
 
     // Modify the nonce in the block header. In order to collect the guesser
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
-    let nonce: Digest = rng.random();
+    // let nonce: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
-    if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
-        debug!("Guesser was cancelled.");
-        return GuessNonceResult::Cancelled;
-    }
+    // if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
+    //     debug!("Guesser was cancelled.");
+    //     return GuessNonceResult::Cancelled;
+    // }
 
-    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
+    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, *nonce);
     let success = block_hash <= threshold;
 
-    match success {
+    let ret = match success {
         false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::NonceFound { nonce },
-    }
+        true => GuessNonceResult::NonceFound { nonce: *nonce },
+    };
+
+    *nonce = block_hash;
+
+    ret
 }
 
 /// Make a coinbase transaction rewarding the composer identified by receiving
@@ -1092,16 +1102,22 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(rand::rng, |prng, _i| {
-                    guess_nonce_iteration(
-                        kernel_auth_path,
-                        threshold,
-                        sleepy_guessing,
-                        prng,
-                        header_auth_path,
-                        &worker_task_tx,
-                    );
-                })
+                .map_init(
+                    || {
+                        let mut prng = rand::rng();
+                        prng.random()
+                    },
+                    |initial_nonce, _i| {
+                        guess_nonce_iteration(
+                            kernel_auth_path,
+                            threshold,
+                            sleepy_guessing,
+                            initial_nonce,
+                            header_auth_path,
+                            &worker_task_tx,
+                        );
+                    },
+                )
                 .count();
         drop(worker_task_rx);
 
