@@ -45,6 +45,7 @@ use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
+use crate::models::peer::BootstrapStatus;
 use crate::models::peer::IssuedSyncChallenge;
 use crate::models::peer::MutablePeerState;
 use crate::models::peer::NegativePeerSanction;
@@ -200,6 +201,22 @@ impl PeerLoopHandler {
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Cannot reward banned peer: {err}"))
+    }
+
+    /// Update a peer's bootstrap status.
+    ///
+    /// # Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn set_bootstrap_status(&mut self, status: BootstrapStatus) {
+        let peer_address = self.peer_address;
+        info!("Setting peer {peer_address} to bootstrap status \"{status}\"");
+
+        self.global_state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .bootstrap_status
+            .insert(peer_address, status);
     }
 
     /// Construct a batch response, with blocks and their MMR membership proofs
@@ -1542,6 +1559,10 @@ impl PeerLoopHandler {
                     self.reward(PositivePeerSanction::NewBlockProposal).await?;
                 }
 
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BootstrapStatus(status) => {
+                self.set_bootstrap_status(status).await;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
