@@ -1012,6 +1012,9 @@ impl Block {
 
 #[cfg(test)]
 pub(crate) mod block_tests {
+    use std::collections::HashMap;
+
+    use bytesize::ByteSize;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -1026,7 +1029,12 @@ pub(crate) mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::mine_loop::fast_kernel_mast_hash;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+    use crate::mine_loop::precalculate_block_auth_paths;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
@@ -1711,5 +1719,201 @@ pub(crate) mod block_tests {
     #[test]
     fn premine_distribution_does_not_crash() {
         Block::premine_distribution();
+    }
+
+    fn block_size_statistics(block: &Block) -> HashMap<String, (usize, f64)> {
+        let mut dictionary = HashMap::new();
+        let total_size = bincode::serialize(block).unwrap().len();
+        dictionary.insert("_total".to_string(), (total_size, 1.0));
+
+        macro_rules! insert_statistic {
+            ($field_expr:expr, $label:expr) => {{
+                let size = bincode::serialize($field_expr).unwrap().len();
+                dictionary.insert(
+                    $label.to_string(),
+                    (size, (size as f64) / (total_size as f64)),
+                );
+            }};
+        }
+        insert_statistic!(block.header(), "header");
+        insert_statistic!(block.body(), "body");
+        insert_statistic!(&block.body().block_mmr_accumulator, "body / block_mmra");
+        insert_statistic!(
+            &block.body().lock_free_mmr_accumulator,
+            "body / lock_free_mmra"
+        );
+        insert_statistic!(&block.body().mutator_set_accumulator, "body / mutator_set");
+        insert_statistic!(&block.body().transaction_kernel, "body / transaction");
+        insert_statistic!(
+            &block.body().transaction_kernel.inputs,
+            "body / transaction / inputs"
+        );
+        insert_statistic!(
+            &block.body().transaction_kernel.outputs,
+            "body / transaction / outputs"
+        );
+        insert_statistic!(
+            &block.body().transaction_kernel.public_announcements,
+            "body / transaction / public_announcements"
+        );
+        insert_statistic!(block.appendix(), "appendix");
+        insert_statistic!(&block.proof, "proof");
+
+        dictionary
+    }
+
+    fn print_block_size_statistics(dictionary: HashMap<String, (usize, f64)>) {
+        let max_label_length = dictionary.keys().map(|k| k.len()).max().unwrap();
+        let byte_size_string =
+            |(abs, _rs): (usize, f64)| ByteSize::b(abs as u64).to_string_as(true);
+        let percentage_string = |(_abs, rs)| format!("{:.2}%", 100.0 * rs);
+        let max_size_string = dictionary
+            .values()
+            .cloned()
+            .map(byte_size_string)
+            .map(|s| s.len())
+            .max()
+            .unwrap();
+        let max_percentage_string = dictionary
+            .values()
+            .cloned()
+            .map(percentage_string)
+            .map(|p| p.len())
+            .max()
+            .unwrap();
+
+        let mut collection = dictionary.into_iter().collect_vec();
+        collection.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+        for (k, v) in collection {
+            println!(
+                "{:<max_label_length$} {:>max_size_string$} {:>max_percentage_string$}",
+                k,
+                byte_size_string(v),
+                percentage_string(v)
+            );
+        }
+    }
+
+    /// See how big transactions can get before the block becomes invalid.
+    ///
+    /// Create block i that spends i inputs. Do this indefinitely. Report on
+    /// block size statistics.
+    #[tokio::test]
+    async fn block_size_limit() {
+        let mut rng = StdRng::seed_from_u64(893423984854);
+        let network = Network::Main;
+        let launch_date = network.launch_date();
+        let mut now = launch_date;
+        let devnet_wallet = WalletSecret::devnet_wallet();
+        let mut alice =
+            mock_genesis_global_state(network, 0, devnet_wallet, cli_args::Args::default()).await;
+
+        let job_queue = TritonVmJobQueue::dummy();
+
+        let genesis_block = Block::genesis(network);
+        let genesis_block_statistics = block_size_statistics(&genesis_block);
+        print_block_size_statistics(genesis_block_statistics);
+
+        let mut blocks = vec![genesis_block];
+
+        for i in 1..100 {
+            now += TARGET_BLOCK_INTERVAL;
+
+            // create coinbase transaction
+            let (mut transaction, _) = make_coinbase_transaction_from_state(
+                &blocks[i - 1],
+                &alice,
+                0f64,
+                launch_date,
+                TxProvingCapability::SingleProof,
+                TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
+            )
+            .await
+            .unwrap();
+
+            // for all own UTXOs, spend to self
+            for _ in 0..i {
+                // create a transaction spending it to self
+                let change_key = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_symmetric_key()
+                    .await;
+                let receiving_address = alice
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await
+                    .unwrap()
+                    .to_address()
+                    .unwrap();
+                let tx_outputs = vec![TxOutput::onchain_native_currency(
+                    NativeCurrencyAmount::coins(1),
+                    rng.random(),
+                    receiving_address,
+                    true,
+                )]
+                .into();
+                let (self_spending_transaction, _, _) = alice
+                    .lock_guard_mut()
+                    .await
+                    .create_transaction_with_prover_capability(
+                        tx_outputs,
+                        change_key.into(),
+                        UtxoNotificationMedium::OffChain,
+                        NativeCurrencyAmount::coins(0),
+                        now,
+                        TxProvingCapability::SingleProof,
+                        &job_queue,
+                    )
+                    .await
+                    .unwrap();
+
+                // merge that transaction in
+                transaction = transaction
+                    .merge_with(
+                        self_spending_transaction,
+                        rng.random(),
+                        &job_queue,
+                        TritonVmProofJobOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            // compose block
+            let mut block = Block::compose(
+                blocks.last().unwrap(),
+                transaction,
+                now,
+                None,
+                &job_queue,
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            // guess block
+            let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
+            let mut nonce = rng.random();
+            while fast_kernel_mast_hash(kernel_auth_path, header_auth_path, nonce)
+                > blocks.last().unwrap().header().difficulty.target()
+            {
+                nonce = rng.random();
+            }
+            block.set_header_nonce(nonce);
+
+            // update state with new block
+            alice.set_new_tip(block.clone()).await.unwrap();
+
+            // report size statistics
+            println!("Mined block {i} with {i} inputs and {i} outputs:");
+            print_block_size_statistics(block_size_statistics(&block));
+            println!();
+
+            blocks.push(block);
+        }
     }
 }
