@@ -1816,6 +1816,7 @@ pub(crate) mod block_tests {
 
         let mut blocks = vec![genesis_block];
 
+        now += Timestamp::months(6);
         for i in 1..100 {
             now += TARGET_BLOCK_INTERVAL;
 
@@ -1905,13 +1906,18 @@ pub(crate) mod block_tests {
             }
             block.set_header_nonce(nonce);
 
-            // update state with new block
-            alice.set_new_tip(block.clone()).await.unwrap();
-
             // report size statistics
             println!("Mined block {i} with {i} inputs and {i} outputs:");
             print_block_size_statistics(block_size_statistics(&block));
             println!();
+
+            println!(
+                "block is valid? {}",
+                block.is_valid(blocks.last().unwrap(), now).await
+            );
+
+            // update state with new block
+            alice.set_new_tip(block.clone()).await.unwrap();
 
             blocks.push(block);
         }
