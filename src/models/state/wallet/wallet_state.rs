@@ -132,7 +132,7 @@ impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct StrongUtxoKey {
+pub(crate) struct StrongUtxoKey {
     addition_record: AdditionRecord,
     aocl_index: u64,
 }

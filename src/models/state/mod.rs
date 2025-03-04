@@ -8,6 +8,7 @@ pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
 pub(crate) mod transaction_kernel_id;
+pub(crate) mod tx_initiation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
 
@@ -715,7 +716,11 @@ impl GlobalState {
     /// let mut tx_outputs = state.generate_tx_outputs(outputs, change_notify_medium)?;
     ///
     /// // Create the transaction
-    /// let (transaction, maybe_change_utxo) = state
+    /// let (
+    ///         transaction,
+    ///         transaction_details,
+    ///         maybe_change_utxo
+    ///     ) = state
     ///     .create_transaction(
     ///         tx_outputs,                     // all outputs except `change`
     ///         change_key,                     // send `change` to this key
