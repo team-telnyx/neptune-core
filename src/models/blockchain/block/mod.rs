@@ -1863,7 +1863,7 @@ pub(crate) mod block_tests {
                     .create_transaction_with_prover_capability(
                         tx_outputs,
                         change_key.into(),
-                        UtxoNotificationMedium::OffChain,
+                        UtxoNotificationMedium::OnChain,
                         NativeCurrencyAmount::coins(0),
                         now,
                         TxProvingCapability::SingleProof,
