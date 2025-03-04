@@ -38,6 +38,8 @@ use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
+use tx_initiation_config::ChangeKeyAndMedium;
+use tx_initiation_config::TxInitiationConfig;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
@@ -751,17 +753,13 @@ impl GlobalState {
         timestamp: Timestamp,
         triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
-        self.create_transaction_with_prover_capability(
-            tx_outputs,
-            change_key,
-            change_utxo_notify_medium,
-            fee,
-            timestamp,
-            self.proving_capability(),
-            triton_vm_job_queue,
-        )
-        .await
-        .map(|(tx, _tx_details, output)| (tx, output))
+        let config = TxInitiationConfig::default()
+            .recover_change(change_key, change_utxo_notify_medium)
+            .use_job_queue(triton_vm_job_queue);
+        let tx = self
+            .create_transaction_with_prover_capability(tx_outputs, fee, timestamp, &config)
+            .await?;
+        Ok((tx, config.change_output()))
     }
 
     /// Variant of [Self::create_transaction] that allows caller to specify
@@ -771,15 +769,22 @@ impl GlobalState {
     pub(crate) async fn create_transaction_with_prover_capability(
         &self,
         mut tx_outputs: TxOutputList,
-        change_key: SpendingKey,
-        change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        prover_capability: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, TransactionDetails, Option<TxOutput>)> {
-        // TODO: Attempt to simplify method interface somehow, maybe by moving
-        // it to GlobalStateLock?
+        config: &TxInitiationConfig<'_>,
+    ) -> Result<Transaction> {
+        let Some(ChangeKeyAndMedium {
+            key: change_key,
+            medium: change_utxo_notify_medium,
+        }) = config.change()
+        else {
+            bail!("no where to send change to");
+        };
+        let prover_capability = config.prover_capability();
+        let Some(triton_vm_job_queue) = config.job_queue() else {
+            bail!("no available Triton VM job queue");
+        };
+
         let tip = self.chain.light_state();
         let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
         let tip_digest = tip.hash();
@@ -841,7 +846,16 @@ impl GlobalState {
         )
         .await?;
 
-        Ok((transaction, transaction_details, maybe_change_output))
+        if config.set_transaction_details(transaction_details).is_err() {
+            bail!("Could not set transaction details.");
+        };
+        if let Some(definitely_change_output) = maybe_change_output {
+            if config.set_change_output(definitely_change_output).is_err() {
+                bail!("Could not set change output.");
+            };
+        }
+
+        Ok(transaction)
     }
 
     /// creates a Transaction.
@@ -1867,28 +1881,28 @@ mod global_state_tests {
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs.clone(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy()
+                &TxInitiationConfig::default()
+                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain,)
+                    .with_prover_capability(TxProvingCapability::ProofCollection)
+                    .use_job_queue(&TritonVmJobQueue::dummy()),
             )
             .await
             .is_err());
 
         // one month after though, we should be
-        let (tx, _, _change_output) = bob
+        let tx = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs,
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                &TxInitiationConfig::default()
+                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+                    .with_prover_capability(TxProvingCapability::ProofCollection)
+                    .use_job_queue(&TritonVmJobQueue::dummy()),
             )
             .await
             .unwrap();
@@ -1918,17 +1932,17 @@ mod global_state_tests {
             output_utxos.push(output_utxo);
         }
 
-        let (new_tx, _, _change) = bob
+        let new_tx = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 output_utxos.into(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                &TxInitiationConfig::default()
+                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+                    .with_prover_capability(TxProvingCapability::ProofCollection)
+                    .use_job_queue(&TritonVmJobQueue::dummy()),
             )
             .await
             .unwrap();
@@ -2562,23 +2576,25 @@ mod global_state_tests {
             .next_unused_spending_key(KeyType::Generation)
             .await
             .unwrap();
-        let (tx_to_alice_and_bob, _, maybe_change_output) = premine_receiver
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config_alice_and_bob = TxInitiationConfig::default()
+            .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_to_alice_and_bob = premine_receiver
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()]
                     .concat()
                     .into(),
-                genesis_key,
-                UtxoNotificationMedium::OffChain,
                 fee,
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_alice_and_bob,
             )
             .await
             .unwrap();
-        let Some(change_output) = maybe_change_output else {
+        let Some(change_output) = config_alice_and_bob.change_output() else {
             panic!("Expected change output to genesis receiver");
         };
 
@@ -2742,22 +2758,23 @@ mod global_state_tests {
         // state is being updated correctly with new blocks; not the
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
-        let (tx_from_alice, _, maybe_change_for_alice) = alice
+        let config_alice = TxInitiationConfig::default()
+            .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_from_alice = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs_from_alice.clone().into(),
-                alice_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_alice,
             )
             .await
             .unwrap();
         assert!(
-            maybe_change_for_alice.is_none(),
+            config_alice.change_output().is_none(),
             "No change for Alice as she spent it all"
         );
 
@@ -2785,23 +2802,24 @@ mod global_state_tests {
                 false,
             ),
         ];
-        let (tx_from_bob, _, maybe_change_for_bob) = bob
+        let config_bob = TxInitiationConfig::default()
+            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_from_bob = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs_from_bob.clone().into(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_bob,
             )
             .await
             .unwrap();
 
         assert!(
-            maybe_change_for_bob.is_none(),
+            config_bob.change_output().is_none(),
             "No change for Bob as he spent it all"
         );
 
@@ -3702,21 +3720,22 @@ mod global_state_tests {
                 );
 
                 // create tx.  utxo_notify_method is a test param.
-                let (alice_to_bob_tx, _, maybe_change_utxo) = alice_state_lock
+                let config = TxInitiationConfig::default()
+                    .recover_change(alice_change_key, change_notification_medium)
+                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .use_job_queue(&vm_job_queue);
+                let alice_to_bob_tx = alice_state_lock
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(
                         tx_outputs.clone(),
-                        alice_change_key,
-                        change_notification_medium,
                         alice_to_bob_fee,
                         seven_months_post_launch,
-                        TxProvingCapability::SingleProof,
-                        &vm_job_queue,
+                        &config,
                     )
                     .await
                     .unwrap();
-                let Some(change_utxo) = maybe_change_utxo else {
+                let Some(change_utxo) = config.change_output() else {
                     panic!("A change Tx-output was expected");
                 };
 

@@ -958,8 +958,8 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
@@ -1190,17 +1190,19 @@ pub(crate) mod mine_loop_tests {
             alice_key.to_address().into(),
             false,
         );
-        let (tx_from_alice, _, _maybe_change_output) = alice
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_off_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_from_alice = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 vec![output_to_alice].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 now,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();

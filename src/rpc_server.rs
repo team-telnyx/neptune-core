@@ -82,6 +82,7 @@ use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_initiation_config::TxInitiationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -1900,16 +1901,12 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let (mut transaction, transaction_details, maybe_change_output) = match state
-            .create_transaction_with_prover_capability(
-                tx_outputs.clone(),
-                change_key,
-                owned_utxo_notification_medium,
-                fee,
-                now,
-                tx_proving_capability,
-                self.state.vm_job_queue(),
-            )
+        let config = TxInitiationConfig::default()
+            .recover_change(change_key, owned_utxo_notification_medium)
+            .with_prover_capability(tx_proving_capability)
+            .use_job_queue(self.state.vm_job_queue());
+        let mut transaction = match state
+            .create_transaction_with_prover_capability(tx_outputs.clone(), fee, now, &config)
             .await
         {
             Ok(tx) => tx,
@@ -1918,6 +1915,11 @@ impl NeptuneRPCServer {
                 return Err(e.into());
             }
         };
+        let transaction_details = config
+            .transaction_details()
+            .expect("transaction details are produced along with transaction")
+            .to_owned();
+        let maybe_change_output = config.change_output();
         drop(state);
 
         if let Some(invalid_proof) = mocked_invalid_proof {

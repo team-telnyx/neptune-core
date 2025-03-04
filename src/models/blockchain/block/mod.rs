@@ -1033,10 +1033,10 @@ pub(crate) mod block_tests {
     use crate::mine_loop::fast_kernel_mast_hash;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::mine_loop::precalculate_block_auth_paths;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
@@ -1249,6 +1249,7 @@ pub(crate) mod block_tests {
         use super::*;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+        use crate::models::state::tx_initiation_config::TxInitiationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
 
@@ -1318,17 +1319,19 @@ pub(crate) mod block_tests {
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
-                let (tx2, _, _) = alice
+                let dummy_queue = TritonVmJobQueue::dummy();
+                let config2 = TxInitiationConfig::default()
+                    .recover_change_on_chain(alice_key)
+                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .use_job_queue(&dummy_queue);
+                let tx2 = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction_with_prover_capability(
                         outputs.into(),
-                        alice_key,
-                        UtxoNotificationMedium::OnChain,
                         fee,
                         plus_eight_months,
-                        TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
+                        &config2,
                     )
                     .await
                     .unwrap();
@@ -1374,17 +1377,18 @@ pub(crate) mod block_tests {
                 )
                 .await
                 .unwrap();
-                let (tx3, _, _) = alice
+                let config3 = TxInitiationConfig::default()
+                    .recover_change_on_chain(alice_key)
+                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .use_job_queue(&dummy_queue);
+                let tx3 = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction_with_prover_capability(
                         vec![output_to_self.clone()].into(),
-                        alice_key,
-                        UtxoNotificationMedium::OnChain,
                         fee,
                         plus_nine_months,
-                        TxProvingCapability::SingleProof,
-                        &TritonVmJobQueue::dummy(),
+                        &config3,
                     )
                     .await
                     .unwrap();
@@ -1558,6 +1562,7 @@ pub(crate) mod block_tests {
 
     mod guesser_fee_utxos {
         use super::*;
+        use crate::models::state::tx_initiation_config::TxInitiationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
@@ -1655,17 +1660,19 @@ pub(crate) mod block_tests {
                 true,
             );
             let fee = NativeCurrencyAmount::coins(1);
-            let (tx1, _, _) = alice
+            let dummy_queue = TritonVmJobQueue::dummy();
+            let config = TxInitiationConfig::default()
+                .recover_change_on_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                .use_job_queue(&dummy_queue);
+            let tx1 = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
                     vec![output.clone()].into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OnChain,
                     fee,
                     in_seven_months,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
+                    &config,
                 )
                 .await
                 .unwrap();
@@ -1674,17 +1681,18 @@ pub(crate) mod block_tests {
                 Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
-            let (tx2, _, _) = alice
+            let config2 = TxInitiationConfig::default()
+                .recover_change_on_chain(alice_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                .use_job_queue(&dummy_queue);
+            let tx2 = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
                     vec![output].into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OnChain,
                     fee,
                     in_eight_months,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
+                    &config2,
                 )
                 .await
                 .unwrap();
@@ -1857,17 +1865,18 @@ pub(crate) mod block_tests {
                     true,
                 )]
                 .into();
-                let (self_spending_transaction, _, _) = alice
+                let config = TxInitiationConfig::default()
+                    .recover_change_on_chain(change_key.into())
+                    .with_prover_capability(TxProvingCapability::SingleProof)
+                    .use_job_queue(&job_queue);
+                let self_spending_transaction = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction_with_prover_capability(
                         tx_outputs,
-                        change_key.into(),
-                        UtxoNotificationMedium::OnChain,
                         NativeCurrencyAmount::coins(0),
                         now,
-                        TxProvingCapability::SingleProof,
-                        &job_queue,
+                        &config,
                     )
                     .await
                     .unwrap();

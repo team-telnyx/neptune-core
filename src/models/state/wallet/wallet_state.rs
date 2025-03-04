@@ -1603,10 +1603,10 @@ mod tests {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1837,17 +1837,19 @@ mod tests {
             false,
         );
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
-        let (tx_block2, _, _) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config2 = TxInitiationConfig::default()
+            .recover_change_on_chain(bob_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let tx_block2 = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs.clone().into(),
-                bob_key.into(),
-                UtxoNotificationMedium::OnChain,
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                &config2,
             )
             .await
             .unwrap();
@@ -1881,17 +1883,18 @@ mod tests {
 
         // Repeat the outputs to Alice in block 3 and verify correct new
         // balance.
-        let (tx_block3, _, _) = bob
+        let config3 = TxInitiationConfig::default()
+            .recover_change_on_chain(bob_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let tx_block3 = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
                 tx_outputs.into(),
-                bob_key.into(),
-                UtxoNotificationMedium::OnChain,
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                &config3,
             )
             .await
             .unwrap();
@@ -1941,17 +1944,19 @@ mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let (mut tx_block2, _, _) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_on_chain(bob_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let mut tx_block2 = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
                 vec![txo.clone()].into(),
-                bob_key.into(),
-                UtxoNotificationMedium::OnChain,
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -2041,17 +2046,19 @@ mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let (mut tx_block2, _, _) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_on_chain(bob_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let mut tx_block2 = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
                 vec![txo.clone()].into(),
-                bob_key.into(),
-                UtxoNotificationMedium::OnChain,
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -2754,19 +2761,21 @@ mod tests {
             // Can make tx with PoW-loot.
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
             let fee = NativeCurrencyAmount::coins(1);
+            let dummy_queue = TritonVmJobQueue::dummy();
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
-            let (mut tx_spending_guesser_fee, _, _) = bob
+            let config = TxInitiationConfig::default()
+                .recover_change_on_chain(a_key.into())
+                .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                .use_job_queue(&dummy_queue);
+            let mut tx_spending_guesser_fee = bob
                 .global_state_lock
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
                     vec![].into(),
-                    a_key.into(),
-                    UtxoNotificationMedium::OnChain,
                     fee,
                     block2_timestamp,
-                    TxProvingCapability::PrimitiveWitness,
-                    &TritonVmJobQueue::dummy(),
+                    &config,
                 )
                 .await
                 .unwrap();
@@ -2938,18 +2947,18 @@ mod tests {
                     UtxoNotificationMedium::OnChain,
                 );
 
-                let (tx, _, _change_output) = gs
-                    .create_transaction_with_prover_capability(
-                        tx_outputs,
-                        change_key,
-                        UtxoNotificationMedium::OnChain,
-                        NativeCurrencyAmount::zero(),
-                        timestamp,
-                        TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
-                    )
-                    .await?;
-                tx
+                let dummy_queue = TritonVmJobQueue::dummy();
+                let config = TxInitiationConfig::default()
+                    .recover_change_on_chain(change_key)
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                    .use_job_queue(&dummy_queue);
+                gs.create_transaction_with_prover_capability(
+                    tx_outputs,
+                    NativeCurrencyAmount::zero(),
+                    timestamp,
+                    &config,
+                )
+                .await?
             };
 
             // add the tx to the mempool.
@@ -3022,21 +3031,23 @@ mod tests {
                     an_address.into(),
                     false,
                 );
+
+                let dummy_queue = TritonVmJobQueue::dummy();
+                let config = TxInitiationConfig::default()
+                    .recover_change_off_chain(change_key)
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                    .use_job_queue(&dummy_queue);
                 alice_global_lock
                     .global_state_lock
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(
                         vec![tx_output].into(),
-                        change_key,
-                        UtxoNotificationMedium::OffChain,
                         fee,
                         timestamp,
-                        TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
+                        &config,
                     )
                     .await
-                    .map(|x| x.0)
             }
 
             let network = Network::Main;
@@ -3527,23 +3538,24 @@ mod tests {
                     an_address.into(),
                     false,
                 );
-                let (spending_tx, _, _) = alice_global_lock
+
+                let dummy_queue = TritonVmJobQueue::dummy();
+                let config = TxInitiationConfig::default()
+                    .recover_change_off_chain(change_key)
+                    .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+                    .use_job_queue(&dummy_queue);
+                alice_global_lock
                     .global_state_lock
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(
                         vec![tx_output].into(),
-                        change_key,
-                        UtxoNotificationMedium::OffChain,
                         fee,
                         timestamp,
-                        TxProvingCapability::PrimitiveWitness,
-                        &TritonVmJobQueue::dummy(),
+                        &config,
                     )
                     .await
-                    .unwrap();
-
-                spending_tx
+                    .unwrap()
             }
 
             // Verify that monitored UTXOs spent in blocks that do not belong

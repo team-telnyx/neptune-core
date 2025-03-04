@@ -835,6 +835,7 @@ mod tests {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -986,17 +987,19 @@ mod tests {
         .await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NativeCurrencyAmount::coins(15);
-        let (tx_by_bob, _, _maybe_change_output) = bob
+        let dummy_job_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
+            .with_prover_capability(TxProvingCapability::ProofCollection)
+            .use_job_queue(&dummy_job_queue);
+        let tx_by_bob = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 vec![].into(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OnChain,
                 high_fee,
                 in_seven_months,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -1140,24 +1143,26 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
-        let (tx_by_bob, _, maybe_change_output) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config_bob = TxInitiationConfig::default()
+            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_by_bob = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 utxos_from_bob.clone(),
-                bob_spending_key.into(),
-                UtxoNotificationMedium::OnChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_bob,
             )
             .await
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
         let expected_utxos = bob.lock_guard().await.wallet_state.extract_expected_utxos(
-            utxos_from_bob.concat_with(maybe_change_output),
+            utxos_from_bob.concat_with(config_bob.change_output()),
             UtxoNotifier::Myself,
         );
         bob.lock_guard_mut()
@@ -1181,17 +1186,19 @@ mod tests {
             alice_address.into(),
             true,
         )];
-        let (tx_from_alice_original, _, _maybe_change_output) = alice
+        let dummy_job_queue = TritonVmJobQueue::dummy();
+        let config_alice = TxInitiationConfig::default()
+            .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_job_queue);
+        let tx_from_alice_original = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 utxos_from_alice.into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_alice,
             )
             .await
             .unwrap();
@@ -1474,17 +1481,19 @@ mod tests {
             .to_owned();
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
-        let (unmined_tx, _, _maybe_change_output) = alice
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
+            .with_prover_capability(proving_capability)
+            .use_job_queue(&dummy_queue);
+        let unmined_tx = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 vec![tx_receiver_data].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(1),
                 in_seven_years,
-                proving_capability,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -1602,22 +1611,23 @@ mod tests {
                     false,
                 );
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
-                let (tx, _, _maybe_change_output) = preminer_clone
+                let dummy_queue = TritonVmJobQueue::dummy();
+                let config = TxInitiationConfig::default()
+                    .recover_change_on_chain(premine_spending_key.into())
+                    .with_prover_capability(TxProvingCapability::ProofCollection)
+                    .use_job_queue(&dummy_queue);
+                preminer_clone
                     .clone()
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(
                         tx_outputs.clone(),
-                        premine_spending_key.into(),
-                        UtxoNotificationMedium::OnChain,
                         fee,
                         in_seven_months,
-                        TxProvingCapability::ProofCollection,
-                        &TritonVmJobQueue::dummy(),
+                        &config,
                     )
                     .await
-                    .expect("producing proof collection should succeed");
-                tx
+                    .expect("producing proof collection should succeed")
             };
 
         assert_eq!(0, preminer.lock_guard().await.mempool.len());
@@ -1806,17 +1816,19 @@ mod tests {
             )
             .await;
             let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-            let (tx_by_bob, _, _maybe_change_output) = bob
+            let dummy_queue = TritonVmJobQueue::dummy();
+            let config = TxInitiationConfig::default()
+                .recover_change_on_chain(bob_spending_key.into())
+                .with_prover_capability(proof_type)
+                .use_job_queue(&dummy_queue);
+            let tx_by_bob = bob
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
                     vec![].into(),
-                    bob_spending_key.into(),
-                    UtxoNotificationMedium::OnChain,
                     fee,
                     in_seven_months,
-                    proof_type,
-                    &TritonVmJobQueue::dummy(),
+                    &config,
                 )
                 .await
                 .unwrap();

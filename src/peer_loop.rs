@@ -1901,8 +1901,8 @@ mod peer_loop_tests {
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_block_for_tests;
     use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
@@ -3281,17 +3281,19 @@ mod peer_loop_tests {
             .nth_symmetric_key_for_tests(0);
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let (transaction_1, _, _change_output) = state_lock
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_off_chain(spending_key.into())
+            .with_prover_capability(TxProvingCapability::ProofCollection)
+            .use_job_queue(&dummy_queue);
+        let transaction_1 = state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 Default::default(),
-                spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(0),
                 now,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -3364,17 +3366,19 @@ mod peer_loop_tests {
 
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
-        let (transaction_1, _, _change_output) = state_lock
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_off_chain(spending_key.into())
+            .with_prover_capability(TxProvingCapability::ProofCollection)
+            .use_job_queue(&dummy_queue);
+        let transaction_1 = state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 Default::default(),
-                spending_key.into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(0),
                 now,
-                TxProvingCapability::ProofCollection,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();
@@ -3572,19 +3576,20 @@ mod peer_loop_tests {
                 TransactionProofQuality::ProofCollection => TxProvingCapability::ProofCollection,
                 TransactionProofQuality::SingleProof => TxProvingCapability::SingleProof,
             };
+            let dummy_queue = TritonVmJobQueue::dummy();
+            let config = TxInitiationConfig::default()
+                .recover_change_off_chain(alice_key.into())
+                .with_prover_capability(prover_capability)
+                .use_job_queue(&dummy_queue);
             alice
                 .create_transaction_with_prover_capability(
                     vec![].into(),
-                    alice_key.into(),
-                    UtxoNotificationMedium::OffChain,
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
-                    prover_capability,
-                    &TritonVmJobQueue::dummy(),
+                    &config,
                 )
                 .await
                 .unwrap()
-                .0
         }
 
         #[traced_test]

@@ -469,11 +469,11 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::tx_initiation_config::TxInitiationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -962,20 +962,23 @@ mod wallet_tests {
 
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
-        let (tx, _, _change_output) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let bob_change_key = bob_wallet.nth_generation_spending_key_for_tests(0).into();
+        let config_1 = TxInitiationConfig::default()
+            .recover_change_on_chain(bob_change_key)
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let tx_1 = bob
             .create_transaction_with_prover_capability(
                 receiver_data_to_alice.clone(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
-                UtxoNotificationMedium::OnChain,
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_1,
             )
             .await
             .unwrap();
 
-        let block_1 = invalid_block_with_transaction(&genesis_block, tx);
+        let block_1 = invalid_block_with_transaction(&genesis_block, tx_1);
 
         // Update wallet state with block_1
         assert!(
@@ -1199,15 +1202,16 @@ mod wallet_tests {
             false,
         );
 
-        let (tx_from_bob, _, _maybe_change_output) = bob
+        let config_2b = TxInitiationConfig::default()
+            .recover_change_off_chain(bob_change_key)
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness)
+            .use_job_queue(&dummy_queue);
+        let tx_from_bob = bob
             .create_transaction_with_prover_capability(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
-                UtxoNotificationMedium::OffChain,
                 NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config_2b,
             )
             .await
             .unwrap();
@@ -1411,17 +1415,19 @@ mod wallet_tests {
         let tx_output =
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
-        let (sender_tx, _, _change_output) = bob
+        let dummy_queue = TritonVmJobQueue::dummy();
+        let config = TxInitiationConfig::default()
+            .recover_change_on_chain(change_key.into())
+            .with_prover_capability(TxProvingCapability::SingleProof)
+            .use_job_queue(&dummy_queue);
+        let sender_tx = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 vec![tx_output].into(),
-                change_key.into(),
-                UtxoNotificationMedium::OffChain,
                 one_money,
                 in_seven_months,
-                TxProvingCapability::SingleProof,
-                &TritonVmJobQueue::dummy(),
+                &config,
             )
             .await
             .unwrap();

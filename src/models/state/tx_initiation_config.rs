@@ -15,8 +15,8 @@ use super::wallet::utxo_notification::UtxoNotificationMedium;
 use super::wallet::wallet_state::StrongUtxoKey;
 
 /// Custom trait capturing the closure for selecting UTXOs.
-trait UtxoSelector: Fn(&Utxo) -> bool + Send + 'static {}
-impl<T> UtxoSelector for T where T: Fn(&Utxo) -> bool + Send + 'static {}
+trait UtxoSelector: Fn(&Utxo) -> bool + Send + Sync + 'static {}
+impl<T> UtxoSelector for T where T: Fn(&Utxo) -> bool + Send + Sync + 'static {}
 
 /// Wrapper around the closure type for selecting UTXOs. Purpose: allow
 /// `derive(Debug)` and `derive(Clone)` on structs that have this closure as a
@@ -68,6 +68,18 @@ impl<'a> TxInitiationConfig<'a> {
         self
     }
 
+    /// Enable change-recovery with the given key, and set the medium to
+    /// `OnChain`.
+    pub(crate) fn recover_change_on_chain(self, change_key: SpendingKey) -> Self {
+        self.recover_change(change_key, UtxoNotificationMedium::OnChain)
+    }
+
+    /// Enable change-recovery with the given key, and set the medium to
+    /// `OffChain`.
+    pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
+        self.recover_change(change_key, UtxoNotificationMedium::OffChain)
+    }
+
     /// Configure the proving capacity.
     pub(crate) fn with_prover_capability(mut self, prover_capability: TxProvingCapability) -> Self {
         self.prover_capability = prover_capability;
@@ -83,7 +95,7 @@ impl<'a> TxInitiationConfig<'a> {
     /// When selecting UTXOs, filter them through the given closure.
     pub(crate) fn select_utxos<F>(mut self, selector: F) -> Self
     where
-        F: Fn(&Utxo) -> bool + Send + 'static,
+        F: Fn(&Utxo) -> bool + Send + Sync + 'static,
     {
         self.select_utxos = Some(DebuggableUtxoSelector(Box::new(selector)));
         self
