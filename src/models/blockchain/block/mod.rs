@@ -1911,10 +1911,14 @@ pub(crate) mod block_tests {
             print_block_size_statistics(block_size_statistics(&block));
             println!();
 
+            let block_is_valid = block
+                .is_valid_internal(blocks.last().unwrap(), now, None, None)
+                .await;
             println!(
-                "block is valid? {}",
-                block.is_valid(blocks.last().unwrap(), now).await
+                "block is valid? {:?}",
+                block_is_valid.map(|_| "yes".to_string())
             );
+            assert!(block_is_valid.is_ok());
 
             // update state with new block
             alice.set_new_tip(block.clone()).await.unwrap();
