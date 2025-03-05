@@ -666,8 +666,9 @@ impl GlobalState {
     /// creates a Transaction.
     ///
     /// This API provides a simple-to-use interface for creating a transaction.
-    /// [Utxo](crate::models::blockchain::transaction::utxo::Utxo) inputs are automatically chosen and a change output is
-    /// automatically created, such that:
+    /// [Utxo](crate::models::blockchain::transaction::utxo::Utxo) inputs are
+    /// automatically chosen and a change output is automatically created, such
+    /// that:
     ///
     ///   change = sum(inputs) - sum(outputs) - fee.
     ///
@@ -675,13 +676,8 @@ impl GlobalState {
     /// [Self::generate_tx_outputs()] which determines which outputs should be
     /// `OnChain` or `OffChain`.
     ///
-    /// The return value is the created transaction and some change UTXO with
-    /// associated data or none if the transaction is already balanced. The
-    /// associated data allows the caller to expect and later claim the change
-    /// UTXO.
-    ///
     /// After this call returns, it is the caller's responsibility to inform the
-    /// wallet of any returned ExpectedUtxo, ie `OffChain` secret
+    /// wallet of any produced [`ExpectedUtxo`]s, ie `OffChain` secret
     /// notifications, for utxos that match wallet keys.  Failure to do so can
     /// result in loss of funds!
     ///
@@ -691,9 +687,10 @@ impl GlobalState {
     /// The change_key should normally be a [SpendingKey::Symmetric] in
     /// order to save blockchain space compared to a regular address.
     ///
-    /// Note that `create_transaction()` does not modify any state and does not
-    /// require acquiring write lock.  This is important because internally it
-    /// calls prove() which is a very lengthy operation.
+    /// Note that [`create_transaction`](Self::create_transaction_with_config)
+    /// does not modify any state and does not require acquiring write lock.
+    /// This is important because internally it calls prove() which is a very
+    /// lengthy operation.
     ///
     /// Example:
     ///
@@ -717,16 +714,14 @@ impl GlobalState {
     /// // generate the tx_outputs
     /// let mut tx_outputs = state.generate_tx_outputs(outputs, change_notify_medium)?;
     ///
+    /// // configure the transaction creation process
+    /// let config = TxCreationConfig::default()
+    ///     .recover_change(change_key, change_notify_medium);
+    ///
     /// // Create the transaction
-    /// let (
-    ///         transaction,
-    ///         transaction_details,
-    ///         maybe_change_utxo
-    ///     ) = state
-    ///     .create_transaction(
+    /// let transaction = state
+    ///     .create_transaction_with_config(
     ///         tx_outputs,                     // all outputs except `change`
-    ///         change_key,                     // send `change` to this key
-    ///         change_notify_medium,           // how to notify about `change` utxo
     ///         NativeCurrencyAmount::coins(2), // fee
     ///         Timestamp::now(),               // Timestamp of transaction
     ///     )
@@ -736,7 +731,7 @@ impl GlobalState {
     /// drop(state);
     ///
     /// // Inform wallet of any expected incoming utxos.
-    /// if let Some(change_utxo) = maybe_change_utxo {
+    /// if let Some(change_utxo) = config.change_output() {
     ///     state
     ///         .lock_guard_mut()
     ///         .await
@@ -744,27 +739,6 @@ impl GlobalState {
     ///         .await?;
     /// }
     /// ```
-    pub async fn create_transaction(
-        &self,
-        tx_outputs: TxOutputList,
-        change_key: SpendingKey,
-        change_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NativeCurrencyAmount,
-        timestamp: Timestamp,
-        triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, Option<TxOutput>)> {
-        let config = TxCreationConfig::default()
-            .recover_change(change_key, change_utxo_notify_medium)
-            .use_job_queue(triton_vm_job_queue);
-        let tx = self
-            .create_transaction_with_prover_capability(tx_outputs, fee, timestamp, &config)
-            .await?;
-        Ok((tx, config.change_output()))
-    }
-
-    /// Variant of [Self::create_transaction] that allows caller to specify
-    /// prover capability. [Self::create_transaction] is the preferred interface
-    /// for anything but tests.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_transaction_with_config(
         &self,
