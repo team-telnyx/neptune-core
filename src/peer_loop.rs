@@ -3289,7 +3289,7 @@ mod peer_loop_tests {
         let transaction_1 = state_lock
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
                 now,
@@ -3374,7 +3374,7 @@ mod peer_loop_tests {
         let transaction_1 = state_lock
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
                 now,
@@ -3582,7 +3582,7 @@ mod peer_loop_tests {
                 .with_prover_capability(prover_capability)
                 .use_job_queue(&dummy_queue);
             alice
-                .create_transaction_with_config(
+                .create_transaction(
                     vec![].into(),
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,

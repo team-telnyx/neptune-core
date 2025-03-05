@@ -1906,7 +1906,7 @@ impl NeptuneRPCServer {
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(self.state.vm_job_queue());
         let mut transaction = match state
-            .create_transaction_with_config(tx_outputs.clone(), fee, now, &config)
+            .create_transaction(tx_outputs.clone(), fee, now, &config)
             .await
         {
             Ok(tx) => tx,

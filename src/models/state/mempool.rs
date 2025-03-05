@@ -995,7 +995,7 @@ mod tests {
         let tx_by_bob = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 vec![].into(),
                 high_fee,
                 in_seven_months,
@@ -1151,7 +1151,7 @@ mod tests {
         let tx_by_bob = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 utxos_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
@@ -1194,7 +1194,7 @@ mod tests {
         let tx_from_alice_original = alice
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 utxos_from_alice.into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
@@ -1489,7 +1489,7 @@ mod tests {
         let unmined_tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 vec![tx_receiver_data].into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_years,
@@ -1620,7 +1620,7 @@ mod tests {
                     .clone()
                     .lock_guard()
                     .await
-                    .create_transaction_with_config(
+                    .create_transaction(
                         tx_outputs.clone(),
                         fee,
                         in_seven_months,
@@ -1824,7 +1824,7 @@ mod tests {
             let tx_by_bob = bob
                 .lock_guard()
                 .await
-                .create_transaction_with_config(
+                .create_transaction(
                     vec![].into(),
                     fee,
                     in_seven_months,

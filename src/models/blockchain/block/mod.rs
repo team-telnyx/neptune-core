@@ -1327,12 +1327,7 @@ pub(crate) mod block_tests {
                 let tx2 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_config(
-                        outputs.into(),
-                        fee,
-                        plus_eight_months,
-                        &config2,
-                    )
+                    .create_transaction(outputs.into(), fee, plus_eight_months, &config2)
                     .await
                     .unwrap();
                 let block2_tx = coinbase_for_block2
@@ -1384,7 +1379,7 @@ pub(crate) mod block_tests {
                 let tx3 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_config(
+                    .create_transaction(
                         vec![output_to_self.clone()].into(),
                         fee,
                         plus_nine_months,
@@ -1668,12 +1663,7 @@ pub(crate) mod block_tests {
             let tx1 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_config(
-                    vec![output.clone()].into(),
-                    fee,
-                    in_seven_months,
-                    &config,
-                )
+                .create_transaction(vec![output.clone()].into(), fee, in_seven_months, &config)
                 .await
                 .unwrap();
 
@@ -1688,7 +1678,7 @@ pub(crate) mod block_tests {
             let tx2 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_config(vec![output].into(), fee, in_eight_months, &config2)
+                .create_transaction(vec![output].into(), fee, in_eight_months, &config2)
                 .await
                 .unwrap();
 
@@ -1867,12 +1857,7 @@ pub(crate) mod block_tests {
                 let self_spending_transaction = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_config(
-                        tx_outputs,
-                        NativeCurrencyAmount::coins(0),
-                        now,
-                        &config,
-                    )
+                    .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, &config)
                     .await
                     .unwrap();
 

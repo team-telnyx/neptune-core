@@ -1963,7 +1963,7 @@ mod test {
                 .use_job_queue(&dummy_queue);
             let global_state = global_state_lock.lock_guard().await;
             global_state
-                .create_transaction_with_config(
+                .create_transaction(
                     vec![].into(),
                     fee,
                     in_seven_months,

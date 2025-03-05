@@ -1198,7 +1198,7 @@ pub(crate) mod mine_loop_tests {
         let tx_from_alice = alice
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 vec![output_to_alice].into(),
                 NativeCurrencyAmount::coins(1),
                 now,

@@ -969,7 +969,7 @@ mod wallet_tests {
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
         let tx_1 = bob
-            .create_transaction_with_config(
+            .create_transaction(
                 receiver_data_to_alice.clone(),
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
@@ -1207,7 +1207,7 @@ mod wallet_tests {
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
         let tx_from_bob = bob
-            .create_transaction_with_config(
+            .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
@@ -1423,7 +1423,7 @@ mod wallet_tests {
         let sender_tx = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 vec![tx_output].into(),
                 one_money,
                 in_seven_months,

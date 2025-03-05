@@ -740,7 +740,7 @@ impl GlobalState {
     /// }
     /// ```
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn create_transaction_with_config(
+    pub(crate) async fn create_transaction(
         &self,
         mut tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
@@ -1853,7 +1853,7 @@ mod global_state_tests {
         assert!(bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 tx_outputs.clone(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
@@ -1869,7 +1869,7 @@ mod global_state_tests {
         let tx = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 tx_outputs,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
@@ -1909,7 +1909,7 @@ mod global_state_tests {
         let new_tx = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 output_utxos.into(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
@@ -2558,7 +2558,7 @@ mod global_state_tests {
         let tx_to_alice_and_bob = premine_receiver
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()]
                     .concat()
                     .into(),
@@ -2739,7 +2739,7 @@ mod global_state_tests {
         let tx_from_alice = alice
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 tx_outputs_from_alice.clone().into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
@@ -2783,7 +2783,7 @@ mod global_state_tests {
         let tx_from_bob = bob
             .lock_guard()
             .await
-            .create_transaction_with_config(
+            .create_transaction(
                 tx_outputs_from_bob.clone().into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
@@ -3701,7 +3701,7 @@ mod global_state_tests {
                 let alice_to_bob_tx = alice_state_lock
                     .lock_guard()
                     .await
-                    .create_transaction_with_config(
+                    .create_transaction(
                         tx_outputs.clone(),
                         alice_to_bob_fee,
                         seven_months_post_launch,
