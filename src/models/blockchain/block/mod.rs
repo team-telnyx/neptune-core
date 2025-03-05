@@ -1329,7 +1329,8 @@ pub(crate) mod block_tests {
                     .await
                     .create_transaction(outputs.into(), fee, plus_eight_months, &config2)
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .transaction;
                 let block2_tx = coinbase_for_block2
                     .clone()
                     .merge_with(
@@ -1386,7 +1387,8 @@ pub(crate) mod block_tests {
                         &config3,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .transaction;
                 let block3_tx = coinbase_for_block3
                     .clone()
                     .merge_with(
@@ -1665,7 +1667,8 @@ pub(crate) mod block_tests {
                 .await
                 .create_transaction(vec![output.clone()].into(), fee, in_seven_months, &config)
                 .await
-                .unwrap();
+                .unwrap()
+                .transaction;
 
             let block1 =
                 Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
@@ -1680,7 +1683,8 @@ pub(crate) mod block_tests {
                 .await
                 .create_transaction(vec![output].into(), fee, in_eight_months, &config2)
                 .await
-                .unwrap();
+                .unwrap()
+                .transaction;
 
             let block2 = Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None);
 
@@ -1860,7 +1864,8 @@ pub(crate) mod block_tests {
                     .await
                     .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, &config)
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .transaction;
 
                 // merge that transaction in
                 transaction = transaction

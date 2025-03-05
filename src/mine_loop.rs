@@ -1205,7 +1205,8 @@ pub(crate) mod mine_loop_tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {

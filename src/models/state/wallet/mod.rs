@@ -978,7 +978,7 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        let block_1 = invalid_block_with_transaction(&genesis_block, tx_1);
+        let block_1 = invalid_block_with_transaction(&genesis_block, tx_1.into());
 
         // Update wallet state with block_1
         assert!(
@@ -1235,7 +1235,7 @@ mod wallet_tests {
         .unwrap();
         let merged_tx = coinbase_tx
             .merge_with(
-                tx_from_bob,
+                tx_from_bob.into(),
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -1423,14 +1423,10 @@ mod wallet_tests {
         let sender_tx = bob
             .lock_guard()
             .await
-            .create_transaction(
-                vec![tx_output].into(),
-                one_money,
-                in_seven_months,
-                &config,
-            )
+            .create_transaction(vec![tx_output].into(), one_money, in_seven_months, &config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let tx_for_block = sender_tx
             .merge_with(
                 cbtx,

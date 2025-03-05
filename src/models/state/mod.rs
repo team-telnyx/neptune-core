@@ -8,6 +8,7 @@ pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
 pub(crate) mod transaction_kernel_id;
+pub(crate) mod tx_creation_artifacts;
 pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
@@ -38,6 +39,7 @@ use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
+use tx_creation_artifacts::TxCreationArtifacts;
 use tx_creation_config::ChangeKeyAndMedium;
 use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
@@ -746,7 +748,7 @@ impl GlobalState {
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         config: &TxCreationConfig<'_>,
-    ) -> Result<Transaction> {
+    ) -> Result<TxCreationArtifacts> {
         let Some(ChangeKeyAndMedium {
             key: change_key,
             medium: change_utxo_notify_medium,
@@ -820,16 +822,20 @@ impl GlobalState {
         )
         .await?;
 
-        if config.set_transaction_details(transaction_details).is_err() {
-            bail!("Could not set transaction details.");
+        let maybe_transaction_details = if config.details_are_recorded() {
+            Some(transaction_details)
+        } else {
+            None
         };
-        if let Some(definitely_change_output) = maybe_change_output {
-            if config.set_change_output(definitely_change_output).is_err() {
-                bail!("Could not set change output.");
-            };
-        }
 
-        Ok(transaction)
+        let transaction_creation_artifacts = TxCreationArtifacts {
+            transaction,
+            details: maybe_transaction_details,
+            change_output: maybe_change_output,
+            selection: HashSet::new(),
+        };
+
+        Ok(transaction_creation_artifacts)
     }
 
     /// creates a Transaction.
@@ -1879,7 +1885,8 @@ mod global_state_tests {
                     .use_job_queue(&TritonVmJobQueue::dummy()),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         assert!(tx.is_valid().await);
 
         assert_eq!(
@@ -1919,7 +1926,8 @@ mod global_state_tests {
                     .use_job_queue(&TritonVmJobQueue::dummy()),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         assert!(new_tx.is_valid().await);
         assert_eq!(
             4,
@@ -2555,7 +2563,7 @@ mod global_state_tests {
             .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
-        let tx_to_alice_and_bob = premine_receiver
+        let artifacts_alice_and_bob = premine_receiver
             .lock_guard()
             .await
             .create_transaction(
@@ -2568,7 +2576,8 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-        let Some(change_output) = config_alice_and_bob.change_output() else {
+        let tx_to_alice_and_bob = artifacts_alice_and_bob.transaction;
+        let Some(change_output) = artifacts_alice_and_bob.change_output else {
             panic!("Expected change output to genesis receiver");
         };
 
@@ -2736,7 +2745,7 @@ mod global_state_tests {
             .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
-        let tx_from_alice = alice
+        let artifacts_from_alice = alice
             .lock_guard()
             .await
             .create_transaction(
@@ -2747,8 +2756,9 @@ mod global_state_tests {
             )
             .await
             .unwrap();
+        let tx_from_alice = artifacts_from_alice.transaction;
         assert!(
-            config_alice.change_output().is_none(),
+            artifacts_from_alice.change_output.is_none(),
             "No change for Alice as she spent it all"
         );
 
@@ -2780,7 +2790,7 @@ mod global_state_tests {
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
-        let tx_from_bob = bob
+        let artifacts_from_bob = bob
             .lock_guard()
             .await
             .create_transaction(
@@ -2791,9 +2801,10 @@ mod global_state_tests {
             )
             .await
             .unwrap();
+        let tx_from_bob = artifacts_from_bob.transaction;
 
         assert!(
-            config_bob.change_output().is_none(),
+            artifacts_from_bob.change_output.is_none(),
             "No change for Bob as he spent it all"
         );
 
@@ -3698,7 +3709,7 @@ mod global_state_tests {
                     .recover_change(alice_change_key, change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(&vm_job_queue);
-                let alice_to_bob_tx = alice_state_lock
+                let artifacts = alice_state_lock
                     .lock_guard()
                     .await
                     .create_transaction(
@@ -3709,7 +3720,8 @@ mod global_state_tests {
                     )
                     .await
                     .unwrap();
-                let Some(change_utxo) = config.change_output() else {
+                let alice_to_bob_tx = artifacts.transaction;
+                let Some(change_output) = artifacts.change_output else {
                     panic!("A change Tx-output was expected");
                 };
 
@@ -3720,7 +3732,7 @@ mod global_state_tests {
                     .await
                     .wallet_state
                     .extract_expected_utxos(
-                        tx_outputs.concat_with(vec![change_utxo]),
+                        tx_outputs.concat_with(vec![change_output]),
                         UtxoNotifier::Myself,
                     );
                 alice_state_lock

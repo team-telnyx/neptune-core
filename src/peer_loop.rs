@@ -3296,7 +3296,8 @@ mod peer_loop_tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
@@ -3381,7 +3382,8 @@ mod peer_loop_tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -3590,6 +3592,7 @@ mod peer_loop_tests {
                 )
                 .await
                 .unwrap()
+                .transaction
         }
 
         #[traced_test]

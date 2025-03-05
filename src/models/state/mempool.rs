@@ -995,14 +995,10 @@ mod tests {
         let tx_by_bob = bob
             .lock_guard()
             .await
-            .create_transaction(
-                vec![].into(),
-                high_fee,
-                in_seven_months,
-                &config,
-            )
+            .create_transaction(vec![].into(), high_fee, in_seven_months, &config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         // No candidate when mempool is empty
         assert!(
@@ -1148,7 +1144,7 @@ mod tests {
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
-        let tx_by_bob = bob
+        let artifacts_bob = bob
             .lock_guard()
             .await
             .create_transaction(
@@ -1159,10 +1155,11 @@ mod tests {
             )
             .await
             .unwrap();
+        let tx_by_bob = artifacts_bob.transaction;
 
         // inform wallet of any expected utxos from this tx.
         let expected_utxos = bob.lock_guard().await.wallet_state.extract_expected_utxos(
-            utxos_from_bob.concat_with(config_bob.change_output()),
+            utxos_from_bob.concat_with(artifacts_bob.change_output),
             UtxoNotifier::Myself,
         );
         bob.lock_guard_mut()
@@ -1201,7 +1198,8 @@ mod tests {
                 &config_alice,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         mempool.insert(tx_from_alice_original, TransactionOrigin::Own);
 
         {
@@ -1496,7 +1494,8 @@ mod tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         assert!(unmined_tx.is_valid().await);
         assert!(
             unmined_tx.is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after())
@@ -1620,12 +1619,7 @@ mod tests {
                     .clone()
                     .lock_guard()
                     .await
-                    .create_transaction(
-                        tx_outputs.clone(),
-                        fee,
-                        in_seven_months,
-                        &config,
-                    )
+                    .create_transaction(tx_outputs.clone(), fee, in_seven_months, &config)
                     .await
                     .expect("producing proof collection should succeed")
             };
@@ -1638,7 +1632,8 @@ mod tests {
             preminer.clone(),
             rng.random(),
         )
-        .await;
+        .await
+        .transaction;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_low_fee.clone(), TransactionOrigin::Foreign);
@@ -1653,7 +1648,8 @@ mod tests {
             preminer.clone(),
             rng.random(),
         )
-        .await;
+        .await
+        .transaction;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_high_fee.clone(), TransactionOrigin::Foreign);
@@ -1672,7 +1668,8 @@ mod tests {
                 preminer.clone(),
                 rng.random(),
             )
-            .await;
+            .await
+            .transaction;
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_medium_fee.clone(), TransactionOrigin::Foreign);
             assert_eq!(1, mempool.len());
@@ -1821,19 +1818,14 @@ mod tests {
                 .recover_change_on_chain(bob_spending_key.into())
                 .with_prover_capability(proof_type)
                 .use_job_queue(&dummy_queue);
-            let tx_by_bob = bob
+            let tx = bob
                 .lock_guard()
                 .await
-                .create_transaction(
-                    vec![].into(),
-                    fee,
-                    in_seven_months,
-                    &config,
-                )
+                .create_transaction(vec![].into(), fee, in_seven_months, &config)
                 .await
-                .unwrap();
-
-            tx_by_bob
+                .unwrap()
+                .transaction;
+            tx
         }
 
         #[traced_test]

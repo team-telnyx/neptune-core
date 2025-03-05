@@ -522,7 +522,8 @@ pub(crate) mod test {
             .await
             .create_transaction(vec![tx_output].into(), fee, now, &config)
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;
 
         // Update transaction, stick it into block 2, and verify that block 2

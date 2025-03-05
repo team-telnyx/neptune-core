@@ -1904,8 +1904,9 @@ impl NeptuneRPCServer {
         let config = TxCreationConfig::default()
             .recover_change(change_key, owned_utxo_notification_medium)
             .with_prover_capability(tx_proving_capability)
+            .record_details()
             .use_job_queue(self.state.vm_job_queue());
-        let mut transaction = match state
+        let transaction_creation_artifacts = match state
             .create_transaction(tx_outputs.clone(), fee, now, &config)
             .await
         {
@@ -1915,11 +1916,11 @@ impl NeptuneRPCServer {
                 return Err(e.into());
             }
         };
-        let transaction_details = config
-            .transaction_details()
-            .expect("transaction details are produced along with transaction")
-            .to_owned();
-        let maybe_change_output = config.change_output();
+        let mut transaction = transaction_creation_artifacts.transaction;
+        let transaction_details = transaction_creation_artifacts
+            .details
+            .expect("details should be some when configured to track details");
+        let maybe_change_output = transaction_creation_artifacts.change_output;
         drop(state);
 
         if let Some(invalid_proof) = mocked_invalid_proof {

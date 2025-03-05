@@ -1,18 +1,13 @@
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result;
-use std::sync::OnceLock;
 
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::utxo::Utxo;
 
-use super::transaction_details::TransactionDetails;
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
-use super::wallet::transaction_output::TxOutput;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
-use super::wallet::wallet_state::StrongUtxoKey;
 
 /// Custom trait capturing the closure for selecting UTXOs.
 trait UtxoSelector: Fn(&Utxo) -> bool + Send + Sync + 'static {}
@@ -43,13 +38,12 @@ pub(crate) struct ChangeKeyAndMedium {
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TxCreationConfig<'a> {
-    change: Option<(ChangeKeyAndMedium, OnceLock<TxOutput>)>,
+    change: Option<ChangeKeyAndMedium>,
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Option<&'a TritonVmJobQueue>,
     select_utxos: Option<DebuggableUtxoSelector>,
     track_selection: bool,
-    selection: OnceLock<HashSet<StrongUtxoKey>>,
-    transaction_details: OnceLock<TransactionDetails>,
+    record_details: bool,
 }
 
 impl<'a> TxCreationConfig<'a> {
@@ -64,7 +58,7 @@ impl<'a> TxCreationConfig<'a> {
             key: change_key,
             medium: notification_medium,
         };
-        self.change = Some((change_key_and_medium, OnceLock::default()));
+        self.change = Some(change_key_and_medium);
         self
     }
 
@@ -101,6 +95,12 @@ impl<'a> TxCreationConfig<'a> {
         self
     }
 
+    /// Produce a [`TransactionDetails`] object along with the other artifacts.
+    pub(crate) fn record_details(mut self) -> Self {
+        self.record_details = true;
+        self
+    }
+
     /// Enable selection-tracking.
     ///
     /// When enabled, the a hash set of `StrongUtxoKey`s is stored, indicating
@@ -110,12 +110,17 @@ impl<'a> TxCreationConfig<'a> {
         self
     }
 
+    pub(crate) fn details_are_recorded(&self) -> bool {
+        self.record_details
+    }
+
+    pub(crate) fn selection_is_tracked(&self) -> bool {
+        self.track_selection
+    }
+
     /// Get the change key and notification medium, if any.
     pub(crate) fn change(&self) -> Option<ChangeKeyAndMedium> {
-        self.change
-            .as_ref()
-            .map(|(change_key_and_medium, _)| change_key_and_medium)
-            .cloned()
+        self.change.clone()
     }
 
     /// Get the transaction proving capability.
@@ -132,60 +137,5 @@ impl<'a> TxCreationConfig<'a> {
     /// selection.
     pub(crate) fn utxo_selector(&self) -> Option<&Box<dyn UtxoSelector>> {
         self.select_utxos.as_ref().map(|dus| &dus.0)
-    }
-
-    /// Get the set of strong UTXO keys of selected UTXOs, if selection-tracking
-    /// is enabled.
-    pub(crate) fn selected_utxos(&self) -> Option<&HashSet<StrongUtxoKey>> {
-        self.selection.get()
-    }
-
-    /// Get the transaction details corresponding to the produced transaction.
-    pub(crate) fn transaction_details(&self) -> Option<&TransactionDetails> {
-        self.transaction_details.get()
-    }
-
-    /// Get the change output, if any.
-    pub(crate) fn change_output(&self) -> Option<TxOutput> {
-        self.change
-            .as_ref()
-            .and_then(|(_, output)| output.get())
-            .cloned()
-    }
-
-    /// Set the change output, if change-recovery is enabled and if it is not
-    /// already set. In case of failure, this function returns the given
-    /// `TxOutput` object, wrapped in the `Err` variant.
-    pub(crate) fn set_change_output(
-        &self,
-        output: TxOutput,
-    ) -> std::result::Result<(), Box<TxOutput>> {
-        let Some((_, change_output)) = &self.change else {
-            return std::result::Result::Err(Box::new(output));
-        };
-        change_output.set(output).map_err(Box::new)
-    }
-
-    /// Set the selection of UTXOs that are used as inputs in this transaction.
-    /// If the selection was already set, it will not be overwritten and this
-    /// function returns the given argument, wrapped in the `Err` variant.
-    pub(crate) fn set_selected_utxos(
-        &self,
-        selected_utxos: HashSet<StrongUtxoKey>,
-    ) -> std::result::Result<(), HashSet<StrongUtxoKey>> {
-        self.selection.set(selected_utxos)
-    }
-
-    /// Set the transaction details corresponding to the produced transaction.
-    /// If the transaction details were already set, they will not be
-    /// overwritten and this function returns the given argument, wrapped in the
-    /// `Err` variant.
-    pub(crate) fn set_transaction_details(
-        &self,
-        transaction_details: TransactionDetails,
-    ) -> std::result::Result<(), Box<TransactionDetails>> {
-        self.transaction_details
-            .set(transaction_details)
-            .map_err(Box::new)
     }
 }

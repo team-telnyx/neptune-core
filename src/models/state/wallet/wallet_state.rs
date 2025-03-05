@@ -1852,7 +1852,8 @@ mod tests {
                 &config2,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         // Make block 2, verify that Alice registers correct balance.
         let block2 = invalid_block_with_transaction(&block1, tx_block2.clone());
@@ -1897,7 +1898,8 @@ mod tests {
                 &config3,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let block3 = invalid_block_with_transaction(&block2, tx_block3.clone());
         alice
             .lock_guard_mut()
@@ -1959,7 +1961,8 @@ mod tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
 
         let mut bad_utxo = txo.utxo();
         bad_utxo = bad_utxo.append_to_coin_state(0, random());
@@ -2061,7 +2064,8 @@ mod tests {
                 &config,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .transaction;
         let unrecognized_typescript = Coin {
             type_script_hash: random(),
             state: vec![random(), random()],
@@ -2771,14 +2775,10 @@ mod tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .create_transaction(
-                    vec![].into(),
-                    fee,
-                    block2_timestamp,
-                    &config,
-                )
+                .create_transaction(vec![].into(), fee, block2_timestamp, &config)
                 .await
-                .unwrap();
+                .unwrap()
+                .transaction;
             assert!(
                 tx_spending_guesser_fee.is_valid().await,
                 "Tx spending guesser-fee UTXO must be valid."
@@ -2952,13 +2952,9 @@ mod tests {
                     .recover_change_on_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                     .use_job_queue(&dummy_queue);
-                gs.create_transaction(
-                    tx_outputs,
-                    NativeCurrencyAmount::zero(),
-                    timestamp,
-                    &config,
-                )
-                .await?
+                gs.create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, &config)
+                    .await?
+                    .transaction
             };
 
             // add the tx to the mempool.
@@ -3041,13 +3037,9 @@ mod tests {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .create_transaction(
-                        vec![tx_output].into(),
-                        fee,
-                        timestamp,
-                        &config,
-                    )
+                    .create_transaction(vec![tx_output].into(), fee, timestamp, &config)
                     .await
+                    .map(|tx| tx.into())
             }
 
             let network = Network::Main;
@@ -3548,14 +3540,10 @@ mod tests {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .create_transaction(
-                        vec![tx_output].into(),
-                        fee,
-                        timestamp,
-                        &config,
-                    )
+                    .create_transaction(vec![tx_output].into(), fee, timestamp, &config)
                     .await
                     .unwrap()
+                    .transaction
             }
 
             // Verify that monitored UTXOs spent in blocks that do not belong
