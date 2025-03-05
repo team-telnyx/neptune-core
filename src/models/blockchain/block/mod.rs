@@ -1791,6 +1791,7 @@ pub(crate) mod block_tests {
     ///
     /// Create block i that spends i inputs. Do this indefinitely. Report on
     /// block size statistics.
+    #[ignore = "informational; not testing anything"]
     #[tokio::test]
     async fn block_size_limit() {
         let mut rng = StdRng::seed_from_u64(893423984854);
