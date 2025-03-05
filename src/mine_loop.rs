@@ -45,6 +45,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -384,13 +385,11 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
 
     info!("Start: generate single proof for coinbase transaction");
-    let transaction = GlobalState::create_raw_transaction(
-        &transaction_details,
-        proving_power,
-        vm_job_queue,
-        job_options,
-    )
-    .await?;
+    let config = TxCreationConfig::default()
+        .use_job_queue(vm_job_queue)
+        .with_prover_job_options(job_options.job_priority, 11)
+        .with_prover_capability(proving_power);
+    let transaction = GlobalState::create_raw_transaction(&transaction_details, config).await?;
     info!("Done: generating single proof for coinbase transaction");
 
     Ok((transaction, composer_outputs))

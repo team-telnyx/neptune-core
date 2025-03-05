@@ -77,7 +77,6 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -752,11 +751,6 @@ impl GlobalState {
         timestamp: Timestamp,
         config: TxCreationConfig<'_>,
     ) -> Result<TxCreationArtifacts> {
-        let prover_capability = config.prover_capability();
-        let Some(triton_vm_job_queue) = config.job_queue() else {
-            bail!("no available Triton VM job queue");
-        };
-
         let tip = self.chain.light_state();
         let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
         let tip_digest = tip.hash();
@@ -818,24 +812,18 @@ impl GlobalState {
         // because TritonVmJobOptions::cancel_job_rx is None.
         // see how compose_task handles cancellation in mine_loop.
 
-        // 2. Create the transaction
-        let transaction = Self::create_raw_transaction(
-            &transaction_details,
-            prover_capability,
-            triton_vm_job_queue,
-            (
-                TritonVmJobPriority::High,
-                self.cli.max_log2_padded_height_for_proofs,
-            )
-                .into(),
-        )
-        .await?;
-
         let maybe_transaction_details = if config.details_are_recorded() {
-            Some(transaction_details)
+            Some(transaction_details.clone())
         } else {
             None
         };
+
+        // 2. Create the transaction
+        let config = config.with_prover_job_options(
+            TritonVmJobPriority::High,
+            self.cli.max_log2_padded_height_for_proofs.unwrap_or(11),
+        );
+        let transaction = Self::create_raw_transaction(&transaction_details, config).await?;
 
         let transaction_creation_artifacts = TxCreationArtifacts {
             transaction,
@@ -876,20 +864,12 @@ impl GlobalState {
     /// See the implementation of [Self::create_transaction()].
     pub(crate) async fn create_raw_transaction(
         transaction_details: &TransactionDetails,
-        proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
+        config: TxCreationConfig<'_>,
     ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
-        Self::create_transaction_from_data_worker(
-            transaction_details,
-            proving_power,
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+        Self::create_transaction_from_data_worker(transaction_details, config).await
     }
 
     // note: this executes the prover which can take a very
@@ -899,13 +879,19 @@ impl GlobalState {
     //
     async fn create_transaction_from_data_worker(
         transaction_details: &TransactionDetails,
-        proving_power: TxProvingCapability,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
+        config: TxCreationConfig<'_>,
     ) -> anyhow::Result<Transaction> {
         let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
 
         debug!("primitive witness for transaction: {}", primitive_witness);
+
+        let Some(job_queue) = config.job_queue() else {
+            bail!("No job queue supplied.");
+        };
+
+        let Some(job_options) = config.triton_vm_proof_job_options() else {
+            bail!("No job options supplied.")
+        };
 
         info!(
             "Start: generate proof for {}-in {}-out transaction",
@@ -913,20 +899,14 @@ impl GlobalState {
             primitive_witness.output_utxos.utxos.len()
         );
         let kernel = primitive_witness.kernel.clone();
-        let proof = match proving_power {
+        let proof = match config.prover_capability() {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(
-                    &primitive_witness,
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
-                .await?,
+                ProofCollection::produce(&primitive_witness, job_queue, job_options).await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, triton_vm_job_queue, proof_job_options)
-                    .await?,
+                SingleProof::produce(&primitive_witness, job_queue, job_options).await?,
             ),
         };
 
