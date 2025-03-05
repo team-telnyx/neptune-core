@@ -511,20 +511,17 @@ impl MainLoopHandler {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(None);
-                } else {
-                    info!(
-                        "Block from miner is new canonical tip: {}",
-                        new_block.hash(),
-                    );
                 }
+                info!(
+                    "Block from miner is new canonical tip: {}",
+                    new_block.hash()
+                );
 
                 // Share block with peers first thing.
                 info!("broadcasting new block to peers");
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::Block(new_block.clone()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
+                    .expect("peer broadcast channel should be open");
 
                 let update_jobs = global_state_mut
                     .set_new_tip(new_block.as_ref().clone())
@@ -1105,13 +1102,8 @@ impl MainLoopHandler {
         while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
             let height = match own_tip_height.checked_sub(look_behind) {
                 None => break,
-                Some(height) => {
-                    if height.is_genesis() {
-                        break;
-                    } else {
-                        height
-                    }
-                }
+                Some(height) if height.is_genesis() => break,
+                Some(height) => height,
             };
 
             ret.push(height);
