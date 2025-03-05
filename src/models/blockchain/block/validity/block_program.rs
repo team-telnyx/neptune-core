@@ -520,7 +520,7 @@ pub(crate) mod test {
         let tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(vec![tx_output].into(), fee, now, &config)
+            .create_transaction_with_config(vec![tx_output].into(), fee, now, &config)
             .await
             .unwrap();
         let block1 = mine_tx(&alice, tx.clone(), &genesis_block, now).await;

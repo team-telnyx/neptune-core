@@ -1362,7 +1362,7 @@ mod archival_state_tests {
         let sender_tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction_with_config(
                 vec![tx_output_anyone_can_spend].into(),
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
@@ -1470,7 +1470,7 @@ mod archival_state_tests {
         let big_tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction_with_config(
                 outputs.clone().into(),
                 fee,
                 in_seven_months,
@@ -1487,12 +1487,7 @@ mod archival_state_tests {
         let empty_tx = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
-                vec![].into(),
-                fee,
-                in_seven_months,
-                &config_1b,
-            )
+            .create_transaction_with_config(vec![].into(), fee, in_seven_months, &config_1b)
             .await
             .unwrap();
         let block_1b = invalid_block_with_transaction(&genesis_block, empty_tx);
@@ -1574,12 +1569,7 @@ mod archival_state_tests {
             let tx = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_prover_capability(
-                    outputs.clone().into(),
-                    fee,
-                    timestamp,
-                    &config,
-                )
+                .create_transaction_with_config(outputs.clone().into(), fee, timestamp, &config)
                 .await
                 .unwrap();
             let next_block = invalid_block_with_transaction(&previous_block, tx);
@@ -1820,7 +1810,7 @@ mod archival_state_tests {
         let tx_to_alice_and_bob = premine_rec
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction_with_config(
                 [
                     receiver_data_for_alice.clone(),
                     receiver_data_for_bob.clone(),
@@ -2027,7 +2017,7 @@ mod archival_state_tests {
         let tx_from_alice = alice
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction_with_config(
                 outputs_from_alice.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
@@ -2074,7 +2064,7 @@ mod archival_state_tests {
         let tx_from_bob = bob
             .lock_guard()
             .await
-            .create_transaction_with_prover_capability(
+            .create_transaction_with_config(
                 outputs_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,

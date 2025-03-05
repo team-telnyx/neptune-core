@@ -1327,7 +1327,7 @@ pub(crate) mod block_tests {
                 let tx2 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_prover_capability(
+                    .create_transaction_with_config(
                         outputs.into(),
                         fee,
                         plus_eight_months,
@@ -1384,7 +1384,7 @@ pub(crate) mod block_tests {
                 let tx3 = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_prover_capability(
+                    .create_transaction_with_config(
                         vec![output_to_self.clone()].into(),
                         fee,
                         plus_nine_months,
@@ -1668,7 +1668,7 @@ pub(crate) mod block_tests {
             let tx1 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_prover_capability(
+                .create_transaction_with_config(
                     vec![output.clone()].into(),
                     fee,
                     in_seven_months,
@@ -1688,12 +1688,7 @@ pub(crate) mod block_tests {
             let tx2 = alice
                 .lock_guard()
                 .await
-                .create_transaction_with_prover_capability(
-                    vec![output].into(),
-                    fee,
-                    in_eight_months,
-                    &config2,
-                )
+                .create_transaction_with_config(vec![output].into(), fee, in_eight_months, &config2)
                 .await
                 .unwrap();
 
@@ -1872,7 +1867,7 @@ pub(crate) mod block_tests {
                 let self_spending_transaction = alice
                     .lock_guard_mut()
                     .await
-                    .create_transaction_with_prover_capability(
+                    .create_transaction_with_config(
                         tx_outputs,
                         NativeCurrencyAmount::coins(0),
                         now,
