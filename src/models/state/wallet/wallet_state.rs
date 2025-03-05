@@ -1849,7 +1849,7 @@ mod tests {
                 tx_outputs.clone().into(),
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                &config2,
+                config2,
             )
             .await
             .unwrap()
@@ -1895,7 +1895,7 @@ mod tests {
                 tx_outputs.into(),
                 fee,
                 network.launch_date() + Timestamp::minutes(22),
-                &config3,
+                config3,
             )
             .await
             .unwrap()
@@ -1958,7 +1958,7 @@ mod tests {
                 vec![txo.clone()].into(),
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -2061,7 +2061,7 @@ mod tests {
                 vec![txo.clone()].into(),
                 fee,
                 network.launch_date() + Timestamp::minutes(11),
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -2775,7 +2775,7 @@ mod tests {
                 .global_state_lock
                 .lock_guard()
                 .await
-                .create_transaction(vec![].into(), fee, block2_timestamp, &config)
+                .create_transaction(vec![].into(), fee, block2_timestamp, config)
                 .await
                 .unwrap()
                 .transaction;
@@ -2952,7 +2952,7 @@ mod tests {
                     .recover_change_on_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                     .use_job_queue(&dummy_queue);
-                gs.create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, &config)
+                gs.create_transaction(tx_outputs, NativeCurrencyAmount::zero(), timestamp, config)
                     .await?
                     .transaction
             };
@@ -3037,7 +3037,7 @@ mod tests {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .create_transaction(vec![tx_output].into(), fee, timestamp, &config)
+                    .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .map(|tx| tx.into())
             }
@@ -3540,7 +3540,7 @@ mod tests {
                     .global_state_lock
                     .lock_guard()
                     .await
-                    .create_transaction(vec![tx_output].into(), fee, timestamp, &config)
+                    .create_transaction(vec![tx_output].into(), fee, timestamp, config)
                     .await
                     .unwrap()
                     .transaction

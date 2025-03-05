@@ -1366,7 +1366,7 @@ mod archival_state_tests {
                 vec![tx_output_anyone_can_spend].into(),
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -1471,7 +1471,7 @@ mod archival_state_tests {
         let big_tx = alice
             .lock_guard()
             .await
-            .create_transaction(outputs.clone().into(), fee, in_seven_months, &config_1a)
+            .create_transaction(outputs.clone().into(), fee, in_seven_months, config_1a)
             .await
             .unwrap()
             .transaction;
@@ -1484,7 +1484,7 @@ mod archival_state_tests {
         let empty_tx = alice
             .lock_guard()
             .await
-            .create_transaction(vec![].into(), fee, in_seven_months, &config_1b)
+            .create_transaction(vec![].into(), fee, in_seven_months, config_1b)
             .await
             .unwrap()
             .transaction;
@@ -1567,7 +1567,7 @@ mod archival_state_tests {
             let tx = alice
                 .lock_guard()
                 .await
-                .create_transaction(outputs.clone().into(), fee, timestamp, &config)
+                .create_transaction(outputs.clone().into(), fee, timestamp, config)
                 .await
                 .unwrap()
                 .transaction;
@@ -1818,7 +1818,7 @@ mod archival_state_tests {
                 .into(),
                 fee,
                 in_seven_months,
-                &config,
+                config,
             )
             .await
             .unwrap();
@@ -2021,7 +2021,7 @@ mod archival_state_tests {
                 outputs_from_alice.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_alice,
+                config_alice,
             )
             .await
             .unwrap();
@@ -2069,7 +2069,7 @@ mod archival_state_tests {
                 outputs_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_bob,
+                config_bob,
             )
             .await
             .unwrap();

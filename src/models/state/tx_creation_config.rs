@@ -35,10 +35,26 @@ pub(crate) struct ChangeKeyAndMedium {
     pub(crate) medium: UtxoNotificationMedium,
 }
 
+/// When the selected inputs represent more coins than the outputs (with fee)
+/// where does this change go?
+#[derive(Debug, Clone, Default)]
+pub(crate) enum ChangePolicy {
+    /// If the change is nonzero, crash the transaction creator.
+    #[default]
+    None,
+
+    /// If the change is nonzero, create a new UTXO spendable by this key and
+    /// via this notification medium. Otherwise, do not create a change output.
+    Recover(Box<ChangeKeyAndMedium>),
+
+    /// If the change is nonzero, ignore it.
+    Burn,
+}
+
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TxCreationConfig<'a> {
-    change: Option<ChangeKeyAndMedium>,
+    change_policy: ChangePolicy,
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Option<&'a TritonVmJobQueue>,
     select_utxos: Option<DebuggableUtxoSelector>,
@@ -58,7 +74,7 @@ impl<'a> TxCreationConfig<'a> {
             key: change_key,
             medium: notification_medium,
         };
-        self.change = Some(change_key_and_medium);
+        self.change_policy = ChangePolicy::Recover(Box::new(change_key_and_medium));
         self
     }
 
@@ -72,6 +88,15 @@ impl<'a> TxCreationConfig<'a> {
     /// `OffChain`.
     pub(crate) fn recover_change_off_chain(self, change_key: SpendingKey) -> Self {
         self.recover_change(change_key, UtxoNotificationMedium::OffChain)
+    }
+
+    /// Burn the change.
+    ///
+    /// Only use this if you are certain you know what you are doing. Could
+    /// result in loss-of-funds!
+    pub(crate) fn burn_change(mut self) -> Self {
+        self.change_policy = ChangePolicy::Burn;
+        self
     }
 
     /// Configure the proving capacity.
@@ -103,24 +128,26 @@ impl<'a> TxCreationConfig<'a> {
 
     /// Enable selection-tracking.
     ///
-    /// When enabled, the a hash set of `StrongUtxoKey`s is stored, indicating
+    /// When enabled, the a hash set of [`StrongUtxoKey`]s is stored, indicating
     /// which UTXOs were selected for the transaction.
     pub(crate) fn track_selection(mut self) -> Self {
         self.track_selection = true;
         self
     }
 
+    /// Determine whether a [`TransactionDetails`] object should be produced.
     pub(crate) fn details_are_recorded(&self) -> bool {
         self.record_details
     }
 
+    /// Determine whether to track the selection of input UTXOs.
     pub(crate) fn selection_is_tracked(&self) -> bool {
         self.track_selection
     }
 
     /// Get the change key and notification medium, if any.
-    pub(crate) fn change(&self) -> Option<ChangeKeyAndMedium> {
-        self.change.clone()
+    pub(crate) fn change_policy(&self) -> ChangePolicy {
+        self.change_policy.clone()
     }
 
     /// Get the transaction proving capability.

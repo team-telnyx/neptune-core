@@ -41,6 +41,7 @@ use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
 use tx_creation_artifacts::TxCreationArtifacts;
 use tx_creation_config::ChangeKeyAndMedium;
+use tx_creation_config::ChangePolicy;
 use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
@@ -721,7 +722,7 @@ impl GlobalState {
     ///     .recover_change(change_key, change_notify_medium);
     ///
     /// // Create the transaction
-    /// let transaction = state
+    /// let transaction_creation_artifacts = state
     ///     .create_transaction_with_config(
     ///         tx_outputs,                     // all outputs except `change`
     ///         NativeCurrencyAmount::coins(2), // fee
@@ -732,8 +733,11 @@ impl GlobalState {
     /// // drop read lock.
     /// drop(state);
     ///
+    /// // unpack artifacts
+    /// let transaction = transaction_creation_artifacts.transaction;
+    ///
     /// // Inform wallet of any expected incoming utxos.
-    /// if let Some(change_utxo) = config.change_output() {
+    /// if let Some(change_utxo) = transaction_creation_artifacts.change_output {
     ///     state
     ///         .lock_guard_mut()
     ///         .await
@@ -741,21 +745,13 @@ impl GlobalState {
     ///         .await?;
     /// }
     /// ```
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_transaction(
         &self,
         mut tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        config: &TxCreationConfig<'_>,
+        config: TxCreationConfig<'_>,
     ) -> Result<TxCreationArtifacts> {
-        let Some(ChangeKeyAndMedium {
-            key: change_key,
-            medium: change_utxo_notify_medium,
-        }) = config.change()
-        else {
-            bail!("no where to send change to");
-        };
         let prover_capability = config.prover_capability();
         let Some(triton_vm_job_queue) = config.job_queue() else {
             bail!("no available Triton VM job queue");
@@ -765,7 +761,7 @@ impl GlobalState {
         let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after();
         let tip_digest = tip.hash();
 
-        // 1. create/add change output if necessary.
+        // 1. balance transaction
         let total_spend = tx_outputs.total_native_coins() + fee;
 
         // collect spendable inputs
@@ -784,18 +780,31 @@ impl GlobalState {
             .map(|x| x.utxo.get_native_currency_amount())
             .sum();
 
-        // Add change, if required to balance tx.
-        let mut maybe_change_output = None;
-        if total_spend < total_spendable {
-            let amount = total_spendable.checked_sub(&total_spend).ok_or_else(|| {
-                anyhow::anyhow!("overflow subtracting total_spend from input_amount")
-            })?;
+        // Add change output, if required to balance transaction
+        let nonzero_change = total_spend < total_spendable;
+        let maybe_change_output = match (nonzero_change, config.change_policy()) {
+            (false, _) | (true, ChangePolicy::Burn) => None,
+            (true, ChangePolicy::None) => {
+                bail!(
+                    "No change policy specified, but there is nonzero change. \
+                    Refusing to create change-burning transaction."
+                );
+            }
+            (true, ChangePolicy::Recover(change_key_and_medium)) => {
+                let ChangeKeyAndMedium {
+                    key: change_key,
+                    medium: change_utxo_notify_medium,
+                } = *change_key_and_medium;
+                let amount = total_spendable.checked_sub(&total_spend).ok_or_else(|| {
+                    anyhow::anyhow!("overflow subtracting total_spend from input_amount")
+                })?;
 
-            let change_utxo =
-                self.create_change_output(amount, change_key, change_utxo_notify_medium)?;
-            tx_outputs.push(change_utxo.clone());
-            maybe_change_output = Some(change_utxo);
-        }
+                let change_utxo =
+                    self.create_change_output(amount, change_key, change_utxo_notify_medium)?;
+                tx_outputs.push(change_utxo.clone());
+                Some(change_utxo)
+            }
+        };
 
         let transaction_details = TransactionDetails::new_without_coinbase(
             tx_inputs,
@@ -847,8 +856,8 @@ impl GlobalState {
     /// It is the caller's responsibility to provide inputs and outputs such
     /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
     ///
-    /// Note that this means the caller must calculate the `change` amount if any
-    /// and provide an output for the change.
+    /// Note that this means the caller must calculate the `change` amount if
+    /// any and provide an output for the change.
     ///
     /// The `tx_outputs` parameter should normally be generated with
     /// [Self::generate_tx_outputs()] which determines which outputs should be
@@ -1856,6 +1865,11 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp;
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
+        let job_queue = TritonVmJobQueue::dummy();
+        let config = TxCreationConfig::default()
+            .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
+            .with_prover_capability(TxProvingCapability::ProofCollection)
+            .use_job_queue(&job_queue);
         assert!(bob
             .lock_guard()
             .await
@@ -1863,10 +1877,7 @@ mod global_state_tests {
                 tx_outputs.clone(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
-                &TxCreationConfig::default()
-                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain,)
-                    .with_prover_capability(TxProvingCapability::ProofCollection)
-                    .use_job_queue(&TritonVmJobQueue::dummy()),
+                config.clone(),
             )
             .await
             .is_err());
@@ -1879,10 +1890,7 @@ mod global_state_tests {
                 tx_outputs,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                &TxCreationConfig::default()
-                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
-                    .with_prover_capability(TxProvingCapability::ProofCollection)
-                    .use_job_queue(&TritonVmJobQueue::dummy()),
+                config.clone(),
             )
             .await
             .unwrap()
@@ -1920,10 +1928,7 @@ mod global_state_tests {
                 output_utxos.into(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                &TxCreationConfig::default()
-                    .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
-                    .with_prover_capability(TxProvingCapability::ProofCollection)
-                    .use_job_queue(&TritonVmJobQueue::dummy()),
+                config,
             )
             .await
             .unwrap()
@@ -2572,7 +2577,7 @@ mod global_state_tests {
                     .into(),
                 fee,
                 in_seven_months,
-                &config_alice_and_bob,
+                config_alice_and_bob,
             )
             .await
             .unwrap();
@@ -2752,7 +2757,7 @@ mod global_state_tests {
                 tx_outputs_from_alice.clone().into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_alice,
+                config_alice,
             )
             .await
             .unwrap();
@@ -2797,7 +2802,7 @@ mod global_state_tests {
                 tx_outputs_from_bob.clone().into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_bob,
+                config_bob,
             )
             .await
             .unwrap();
@@ -3716,7 +3721,7 @@ mod global_state_tests {
                         tx_outputs.clone(),
                         alice_to_bob_fee,
                         seven_months_post_launch,
-                        &config,
+                        config,
                     )
                     .await
                     .unwrap();

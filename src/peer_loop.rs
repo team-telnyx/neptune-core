@@ -3293,7 +3293,7 @@ mod peer_loop_tests {
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
                 now,
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -3379,7 +3379,7 @@ mod peer_loop_tests {
                 Default::default(),
                 NativeCurrencyAmount::coins(0),
                 now,
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -3588,7 +3588,7 @@ mod peer_loop_tests {
                     vec![].into(),
                     NativeCurrencyAmount::coins(1),
                     in_seven_months,
-                    &config,
+                    config,
                 )
                 .await
                 .unwrap()

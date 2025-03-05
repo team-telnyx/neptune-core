@@ -995,7 +995,7 @@ mod tests {
         let tx_by_bob = bob
             .lock_guard()
             .await
-            .create_transaction(vec![].into(), high_fee, in_seven_months, &config)
+            .create_transaction(vec![].into(), high_fee, in_seven_months, config)
             .await
             .unwrap()
             .transaction;
@@ -1151,7 +1151,7 @@ mod tests {
                 utxos_from_bob.clone(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_bob,
+                config_bob,
             )
             .await
             .unwrap();
@@ -1195,7 +1195,7 @@ mod tests {
                 utxos_from_alice.into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_months,
-                &config_alice,
+                config_alice,
             )
             .await
             .unwrap()
@@ -1491,7 +1491,7 @@ mod tests {
                 vec![tx_receiver_data].into(),
                 NativeCurrencyAmount::coins(1),
                 in_seven_years,
-                &config,
+                config,
             )
             .await
             .unwrap()
@@ -1619,7 +1619,7 @@ mod tests {
                     .clone()
                     .lock_guard()
                     .await
-                    .create_transaction(tx_outputs.clone(), fee, in_seven_months, &config)
+                    .create_transaction(tx_outputs.clone(), fee, in_seven_months, config)
                     .await
                     .expect("producing proof collection should succeed")
             };
@@ -1821,7 +1821,7 @@ mod tests {
             let tx = bob
                 .lock_guard()
                 .await
-                .create_transaction(vec![].into(), fee, in_seven_months, &config)
+                .create_transaction(vec![].into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction;

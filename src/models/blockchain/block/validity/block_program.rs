@@ -520,7 +520,7 @@ pub(crate) mod test {
         let tx = alice
             .lock_guard()
             .await
-            .create_transaction(vec![tx_output].into(), fee, now, &config)
+            .create_transaction(vec![tx_output].into(), fee, now, config)
             .await
             .unwrap()
             .transaction;

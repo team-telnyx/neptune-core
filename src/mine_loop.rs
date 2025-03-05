@@ -1202,7 +1202,7 @@ pub(crate) mod mine_loop_tests {
                 vec![output_to_alice].into(),
                 NativeCurrencyAmount::coins(1),
                 now,
-                &config,
+                config,
             )
             .await
             .unwrap()

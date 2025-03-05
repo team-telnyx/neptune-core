@@ -973,7 +973,7 @@ mod wallet_tests {
                 receiver_data_to_alice.clone(),
                 NativeCurrencyAmount::coins(2),
                 in_seven_months,
-                &config_1,
+                config_1,
             )
             .await
             .unwrap();
@@ -1211,7 +1211,7 @@ mod wallet_tests {
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
-                &config_2b,
+                config_2b,
             )
             .await
             .unwrap();
@@ -1423,7 +1423,7 @@ mod wallet_tests {
         let sender_tx = bob
             .lock_guard()
             .await
-            .create_transaction(vec![tx_output].into(), one_money, in_seven_months, &config)
+            .create_transaction(vec![tx_output].into(), one_money, in_seven_months, config)
             .await
             .unwrap()
             .transaction;

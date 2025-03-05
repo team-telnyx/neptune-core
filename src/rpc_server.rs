@@ -1907,7 +1907,7 @@ impl NeptuneRPCServer {
             .record_details()
             .use_job_queue(self.state.vm_job_queue());
         let transaction_creation_artifacts = match state
-            .create_transaction(tx_outputs.clone(), fee, now, &config)
+            .create_transaction(tx_outputs.clone(), fee, now, config)
             .await
         {
             Ok(tx) => tx,
