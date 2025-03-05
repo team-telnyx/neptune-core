@@ -2338,9 +2338,8 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         // verify the block actually exists
         Ok(archival_state
@@ -2360,16 +2359,14 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         let tip_digest = state.chain.light_state().hash();
         let archival_state = state.chain.archival_state();
 
-        let block = match archival_state.get_block(digest).await.unwrap() {
-            Some(b) => b,
-            None => return Ok(None),
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
         };
         let is_canonical = archival_state
             .block_belongs_to_canonical_chain(digest)
@@ -2626,9 +2623,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let block_digest = match block_selector.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(block_digest) = block_selector.as_digest(&state).await else {
+            return Ok(None);
         };
         Ok(state
             .chain
@@ -3141,9 +3137,8 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
-        let last_block = match last_block.as_digest(&state).await {
-            Some(d) => d,
-            None => return Ok(None),
+        let Some(last_block) = last_block.as_digest(&state).await else {
+            return Ok(None);
         };
         let mut intervals = vec![];
         let mut current = state
