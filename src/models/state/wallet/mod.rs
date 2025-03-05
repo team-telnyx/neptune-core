@@ -65,6 +65,7 @@ pub struct WalletSecret {
 
 /// Struct for containing file paths for secrets. To be communicated to user upon
 /// wallet creation or wallet opening.
+#[derive(Debug, Clone)]
 pub struct WalletSecretFileLocations {
     pub wallet_secret_path: PathBuf,
     pub incoming_randomness_file: PathBuf,
