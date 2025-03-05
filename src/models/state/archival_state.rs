@@ -1162,7 +1162,7 @@ mod archival_state_tests {
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -1355,7 +1355,7 @@ mod archival_state_tests {
         let tx_output_anyone_can_spend =
             TxOutput::no_notification(utxo, rng.random(), rng.random(), false);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1463,7 +1463,7 @@ mod archival_state_tests {
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config_1a = TxInitiationConfig::default()
+        let config_1a = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1480,7 +1480,7 @@ mod archival_state_tests {
             .unwrap();
         let block_1a = invalid_block_with_transaction(&genesis_block, big_tx);
 
-        let config_1b = TxInitiationConfig::default()
+        let config_1b = TxCreationConfig::default()
             .recover_change_on_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1567,7 +1567,7 @@ mod archival_state_tests {
         let dummy_queue = TritonVmJobQueue::dummy();
         for _ in 0..num_blocks {
             let timestamp = previous_block.header().timestamp + Timestamp::months(7);
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                 .use_job_queue(&dummy_queue);
@@ -1813,7 +1813,7 @@ mod archival_state_tests {
             .await
             .unwrap();
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_off_chain(change_key)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -2020,7 +2020,7 @@ mod archival_state_tests {
             .wallet_secret
             .nth_symmetric_key_for_tests(0)
             .into();
-        let config_alice = TxInitiationConfig::default()
+        let config_alice = TxCreationConfig::default()
             .recover_change_off_chain(alice_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -2067,7 +2067,7 @@ mod archival_state_tests {
             .wallet_secret
             .nth_symmetric_key_for_tests(0)
             .into();
-        let config_bob = TxInitiationConfig::default()
+        let config_bob = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);

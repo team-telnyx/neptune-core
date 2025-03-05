@@ -1934,7 +1934,7 @@ mod test {
         use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
-        use crate::models::state::tx_initiation_config::TxInitiationConfig;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
 
         async fn tx_no_outputs(
             global_state_lock: &GlobalStateLock,
@@ -1957,7 +1957,7 @@ mod test {
                 + Timestamp::months(7);
 
             let dummy_queue = TritonVmJobQueue::dummy();
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_off_chain(change_key.into())
                 .with_prover_capability(tx_proof_type)
                 .use_job_queue(&dummy_queue);

@@ -835,7 +835,7 @@ mod tests {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -988,7 +988,7 @@ mod tests {
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NativeCurrencyAmount::coins(15);
         let dummy_job_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
             .with_prover_capability(TxProvingCapability::ProofCollection)
             .use_job_queue(&dummy_job_queue);
@@ -1144,7 +1144,7 @@ mod tests {
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config_bob = TxInitiationConfig::default()
+        let config_bob = TxCreationConfig::default()
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OnChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -1187,7 +1187,7 @@ mod tests {
             true,
         )];
         let dummy_job_queue = TritonVmJobQueue::dummy();
-        let config_alice = TxInitiationConfig::default()
+        let config_alice = TxCreationConfig::default()
             .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_job_queue);
@@ -1482,7 +1482,7 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change(alice_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(proving_capability)
             .use_job_queue(&dummy_queue);
@@ -1612,7 +1612,7 @@ mod tests {
                 );
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
                 let dummy_queue = TritonVmJobQueue::dummy();
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change_on_chain(premine_spending_key.into())
                     .with_prover_capability(TxProvingCapability::ProofCollection)
                     .use_job_queue(&dummy_queue);
@@ -1817,7 +1817,7 @@ mod tests {
             .await;
             let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let dummy_queue = TritonVmJobQueue::dummy();
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_on_chain(bob_spending_key.into())
                 .with_prover_capability(proof_type)
                 .use_job_queue(&dummy_queue);

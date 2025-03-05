@@ -351,7 +351,7 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::WalletSecret;
@@ -513,7 +513,7 @@ pub(crate) mod test {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_off_chain(alice_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);

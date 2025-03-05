@@ -40,9 +40,9 @@ pub(crate) struct ChangeKeyAndMedium {
     pub(crate) medium: UtxoNotificationMedium,
 }
 
-/// Options and configuration settings for initiating transactions
+/// Options and configuration settings for creating transactions
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TxInitiationConfig<'a> {
+pub(crate) struct TxCreationConfig<'a> {
     change: Option<(ChangeKeyAndMedium, OnceLock<TxOutput>)>,
     prover_capability: TxProvingCapability,
     triton_vm_job_queue: Option<&'a TritonVmJobQueue>,
@@ -52,7 +52,7 @@ pub(crate) struct TxInitiationConfig<'a> {
     transaction_details: OnceLock<TransactionDetails>,
 }
 
-impl<'a> TxInitiationConfig<'a> {
+impl<'a> TxCreationConfig<'a> {
     /// Enable change-recovery and configure which key and notification medium
     /// to use for that purpose.
     pub(crate) fn recover_change(

@@ -469,7 +469,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -964,7 +964,7 @@ mod wallet_tests {
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
         let dummy_queue = TritonVmJobQueue::dummy();
         let bob_change_key = bob_wallet.nth_generation_spending_key_for_tests(0).into();
-        let config_1 = TxInitiationConfig::default()
+        let config_1 = TxCreationConfig::default()
             .recover_change_on_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -1202,7 +1202,7 @@ mod wallet_tests {
             false,
         );
 
-        let config_2b = TxInitiationConfig::default()
+        let config_2b = TxCreationConfig::default()
             .recover_change_off_chain(bob_change_key)
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1416,7 +1416,7 @@ mod wallet_tests {
             TxOutput::no_notification(anyone_can_spend_utxo, rng.random(), rng.random(), false);
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_on_chain(change_key.into())
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);

@@ -1033,7 +1033,7 @@ pub(crate) mod block_tests {
     use crate::mine_loop::fast_kernel_mast_hash;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::mine_loop::precalculate_block_auth_paths;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -1249,7 +1249,7 @@ pub(crate) mod block_tests {
         use super::*;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
-        use crate::models::state::tx_initiation_config::TxInitiationConfig;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
 
@@ -1320,7 +1320,7 @@ pub(crate) mod block_tests {
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
                 let dummy_queue = TritonVmJobQueue::dummy();
-                let config2 = TxInitiationConfig::default()
+                let config2 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(&dummy_queue);
@@ -1377,7 +1377,7 @@ pub(crate) mod block_tests {
                 )
                 .await
                 .unwrap();
-                let config3 = TxInitiationConfig::default()
+                let config3 = TxCreationConfig::default()
                     .recover_change_on_chain(alice_key)
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(&dummy_queue);
@@ -1562,7 +1562,7 @@ pub(crate) mod block_tests {
 
     mod guesser_fee_utxos {
         use super::*;
-        use crate::models::state::tx_initiation_config::TxInitiationConfig;
+        use crate::models::state::tx_creation_config::TxCreationConfig;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
         use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
@@ -1661,7 +1661,7 @@ pub(crate) mod block_tests {
             );
             let fee = NativeCurrencyAmount::coins(1);
             let dummy_queue = TritonVmJobQueue::dummy();
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                 .use_job_queue(&dummy_queue);
@@ -1681,7 +1681,7 @@ pub(crate) mod block_tests {
                 Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
-            let config2 = TxInitiationConfig::default()
+            let config2 = TxCreationConfig::default()
                 .recover_change_on_chain(alice_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                 .use_job_queue(&dummy_queue);
@@ -1865,7 +1865,7 @@ pub(crate) mod block_tests {
                     true,
                 )]
                 .into();
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(&job_queue);

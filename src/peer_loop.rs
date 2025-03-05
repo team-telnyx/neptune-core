@@ -1901,7 +1901,7 @@ mod peer_loop_tests {
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_block_for_tests;
@@ -3282,7 +3282,7 @@ mod peer_loop_tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection)
             .use_job_queue(&dummy_queue);
@@ -3367,7 +3367,7 @@ mod peer_loop_tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_off_chain(spending_key.into())
             .with_prover_capability(TxProvingCapability::ProofCollection)
             .use_job_queue(&dummy_queue);
@@ -3577,7 +3577,7 @@ mod peer_loop_tests {
                 TransactionProofQuality::SingleProof => TxProvingCapability::SingleProof,
             };
             let dummy_queue = TritonVmJobQueue::dummy();
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_off_chain(alice_key.into())
                 .with_prover_capability(prover_capability)
                 .use_job_queue(&dummy_queue);

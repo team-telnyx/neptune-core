@@ -1603,7 +1603,7 @@ mod tests {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
-    use crate::models::state::tx_initiation_config::TxInitiationConfig;
+    use crate::models::state::tx_creation_config::TxCreationConfig;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -1838,7 +1838,7 @@ mod tests {
         );
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config2 = TxInitiationConfig::default()
+        let config2 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1883,7 +1883,7 @@ mod tests {
 
         // Repeat the outputs to Alice in block 3 and verify correct new
         // balance.
-        let config3 = TxInitiationConfig::default()
+        let config3 = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -1945,7 +1945,7 @@ mod tests {
         );
         let fee = NativeCurrencyAmount::coins(10);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -2047,7 +2047,7 @@ mod tests {
         );
         let fee = NativeCurrencyAmount::coins(10);
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change_on_chain(bob_key.into())
             .with_prover_capability(TxProvingCapability::PrimitiveWitness)
             .use_job_queue(&dummy_queue);
@@ -2763,7 +2763,7 @@ mod tests {
             let fee = NativeCurrencyAmount::coins(1);
             let dummy_queue = TritonVmJobQueue::dummy();
             let a_key = GenerationSpendingKey::derive_from_seed(rng.random());
-            let config = TxInitiationConfig::default()
+            let config = TxCreationConfig::default()
                 .recover_change_on_chain(a_key.into())
                 .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                 .use_job_queue(&dummy_queue);
@@ -2948,7 +2948,7 @@ mod tests {
                 );
 
                 let dummy_queue = TritonVmJobQueue::dummy();
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                     .use_job_queue(&dummy_queue);
@@ -3033,7 +3033,7 @@ mod tests {
                 );
 
                 let dummy_queue = TritonVmJobQueue::dummy();
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                     .use_job_queue(&dummy_queue);
@@ -3540,7 +3540,7 @@ mod tests {
                 );
 
                 let dummy_queue = TritonVmJobQueue::dummy();
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change_off_chain(change_key)
                     .with_prover_capability(TxProvingCapability::PrimitiveWitness)
                     .use_job_queue(&dummy_queue);

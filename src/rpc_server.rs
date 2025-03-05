@@ -82,7 +82,7 @@ use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::tx_initiation_config::TxInitiationConfig;
+use crate::models::state::tx_creation_config::TxCreationConfig;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
@@ -1901,7 +1901,7 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change(change_key, owned_utxo_notification_medium)
             .with_prover_capability(tx_proving_capability)
             .use_job_queue(self.state.vm_job_queue());

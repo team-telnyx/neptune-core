@@ -8,7 +8,7 @@ pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
 pub(crate) mod transaction_kernel_id;
-pub(crate) mod tx_initiation_config;
+pub(crate) mod tx_creation_config;
 pub mod tx_proving_capability;
 pub mod wallet;
 
@@ -38,8 +38,8 @@ use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
-use tx_initiation_config::ChangeKeyAndMedium;
-use tx_initiation_config::TxInitiationConfig;
+use tx_creation_config::ChangeKeyAndMedium;
+use tx_creation_config::TxCreationConfig;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
@@ -753,7 +753,7 @@ impl GlobalState {
         timestamp: Timestamp,
         triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
-        let config = TxInitiationConfig::default()
+        let config = TxCreationConfig::default()
             .recover_change(change_key, change_utxo_notify_medium)
             .use_job_queue(triton_vm_job_queue);
         let tx = self
@@ -771,7 +771,7 @@ impl GlobalState {
         mut tx_outputs: TxOutputList,
         fee: NativeCurrencyAmount,
         timestamp: Timestamp,
-        config: &TxInitiationConfig<'_>,
+        config: &TxCreationConfig<'_>,
     ) -> Result<Transaction> {
         let Some(ChangeKeyAndMedium {
             key: change_key,
@@ -1883,7 +1883,7 @@ mod global_state_tests {
                 tx_outputs.clone(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
-                &TxInitiationConfig::default()
+                &TxCreationConfig::default()
                     .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain,)
                     .with_prover_capability(TxProvingCapability::ProofCollection)
                     .use_job_queue(&TritonVmJobQueue::dummy()),
@@ -1899,7 +1899,7 @@ mod global_state_tests {
                 tx_outputs,
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                &TxInitiationConfig::default()
+                &TxCreationConfig::default()
                     .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
                     .with_prover_capability(TxProvingCapability::ProofCollection)
                     .use_job_queue(&TritonVmJobQueue::dummy()),
@@ -1939,7 +1939,7 @@ mod global_state_tests {
                 output_utxos.into(),
                 NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
-                &TxInitiationConfig::default()
+                &TxCreationConfig::default()
                     .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
                     .with_prover_capability(TxProvingCapability::ProofCollection)
                     .use_job_queue(&TritonVmJobQueue::dummy()),
@@ -2577,7 +2577,7 @@ mod global_state_tests {
             .await
             .unwrap();
         let dummy_queue = TritonVmJobQueue::dummy();
-        let config_alice_and_bob = TxInitiationConfig::default()
+        let config_alice_and_bob = TxCreationConfig::default()
             .recover_change(genesis_key, UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -2758,7 +2758,7 @@ mod global_state_tests {
         // state is being updated correctly with new blocks; not the
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
-        let config_alice = TxInitiationConfig::default()
+        let config_alice = TxCreationConfig::default()
             .recover_change(alice_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -2802,7 +2802,7 @@ mod global_state_tests {
                 false,
             ),
         ];
-        let config_bob = TxInitiationConfig::default()
+        let config_bob = TxCreationConfig::default()
             .recover_change(bob_spending_key.into(), UtxoNotificationMedium::OffChain)
             .with_prover_capability(TxProvingCapability::SingleProof)
             .use_job_queue(&dummy_queue);
@@ -3720,7 +3720,7 @@ mod global_state_tests {
                 );
 
                 // create tx.  utxo_notify_method is a test param.
-                let config = TxInitiationConfig::default()
+                let config = TxCreationConfig::default()
                     .recover_change(alice_change_key, change_notification_medium)
                     .with_prover_capability(TxProvingCapability::SingleProof)
                     .use_job_queue(&vm_job_queue);
