@@ -819,10 +819,8 @@ impl GlobalState {
         };
 
         // 2. Create the transaction
-        let config = config.with_prover_job_options(
-            TritonVmJobPriority::High,
-            self.cli.max_log2_padded_height_for_proofs.unwrap_or(11),
-        );
+        let proof_job_options = self.cli.proof_job_options(TritonVmJobPriority::High);
+        let config = config.with_proof_job_options(proof_job_options);
         let transaction = Self::create_raw_transaction(&transaction_details, config).await?;
 
         let transaction_creation_artifacts = TxCreationArtifacts {
@@ -889,9 +887,7 @@ impl GlobalState {
             bail!("No job queue supplied.");
         };
 
-        let Some(job_options) = config.triton_vm_proof_job_options() else {
-            bail!("No job options supplied.")
-        };
+        let job_options = config.proof_job_options();
 
         info!(
             "Start: generate proof for {}-in {}-out transaction",

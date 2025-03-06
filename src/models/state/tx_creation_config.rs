@@ -53,13 +53,6 @@ pub(crate) enum ChangePolicy {
     Burn,
 }
 
-/// Configuration options pertaining to the proof job.
-#[derive(Debug, Clone)]
-pub(crate) struct ProverJobOptions {
-    pub(crate) priority: TritonVmJobPriority,
-    pub(crate) max_log2_padded_height: u8,
-}
-
 /// Options and configuration settings for creating transactions
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TxCreationConfig<'a> {
@@ -69,7 +62,7 @@ pub(crate) struct TxCreationConfig<'a> {
     select_utxos: Option<DebuggableUtxoSelector>,
     track_selection: bool,
     record_details: bool,
-    prover_job_options: Option<ProverJobOptions>,
+    proof_job_options: TritonVmProofJobOptions,
 }
 
 impl<'a> TxCreationConfig<'a> {
@@ -145,15 +138,15 @@ impl<'a> TxCreationConfig<'a> {
         self
     }
 
-    pub(crate) fn with_prover_job_options(
+    /// Set the proof job options.
+    ///
+    /// By default, this field assumes the value determined by
+    /// `TritonVmProofJobOptions::default()`.
+    pub(crate) fn with_proof_job_options(
         mut self,
-        priority: TritonVmJobPriority,
-        max_log2_padded_height: u8,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> Self {
-        self.prover_job_options = Some(ProverJobOptions {
-            priority,
-            max_log2_padded_height,
-        });
+        self.proof_job_options = proof_job_options;
         self
     }
 
@@ -188,19 +181,17 @@ impl<'a> TxCreationConfig<'a> {
         self.select_utxos.as_ref().map(|dus| &dus.0)
     }
 
-    pub(crate) fn proof_job_priority(&self) -> Option<TritonVmJobPriority> {
-        self.prover_job_options.as_ref().map(|op| op.priority)
+    pub(crate) fn proof_job_priority(&self) -> TritonVmJobPriority {
+        self.proof_job_options.job_priority
     }
 
     pub(crate) fn max_log2_padded_height_for_proofs(&self) -> Option<u8> {
-        self.prover_job_options
-            .as_ref()
-            .map(|op| op.max_log2_padded_height)
+        self.proof_job_options
+            .job_settings
+            .max_log2_padded_height_for_proofs
     }
 
-    pub(crate) fn triton_vm_proof_job_options(&self) -> Option<TritonVmProofJobOptions> {
-        self.proof_job_priority().map(|pjp| {
-            TritonVmProofJobOptions::from((pjp, self.max_log2_padded_height_for_proofs()))
-        })
+    pub(crate) fn proof_job_options(&self) -> TritonVmProofJobOptions {
+        self.proof_job_options.clone()
     }
 }

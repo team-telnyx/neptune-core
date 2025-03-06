@@ -387,7 +387,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     info!("Start: generate single proof for coinbase transaction");
     let config = TxCreationConfig::default()
         .use_job_queue(vm_job_queue)
-        .with_prover_job_options(job_options.job_priority, 11)
+        .with_proof_job_options(job_options)
         .with_prover_capability(proving_power);
     let transaction = GlobalState::create_raw_transaction(&transaction_details, config).await?;
     info!("Done: generating single proof for coinbase transaction");
