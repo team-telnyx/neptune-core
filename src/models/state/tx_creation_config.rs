@@ -12,7 +12,7 @@ use super::wallet::address::SpendingKey;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
 
 /// Custom trait capturing the closure for selecting UTXOs.
-trait UtxoSelector: Fn(&Utxo) -> bool + Send + Sync + 'static {}
+pub(crate) trait UtxoSelector: Fn(&Utxo) -> bool + Send + Sync + 'static {}
 impl<T> UtxoSelector for T where T: Fn(&Utxo) -> bool + Send + Sync + 'static {}
 
 /// Wrapper around the closure type for selecting UTXOs. Purpose: allow

@@ -1818,14 +1818,17 @@ mod tests {
                 .recover_change_on_chain(bob_spending_key.into())
                 .with_prover_capability(proof_type)
                 .use_job_queue(&dummy_queue);
-            let tx = bob
+
+            // Clippy is wrong here. You can *not* eliminate the binding.
+            #[allow(clippy::let_and_return)]
+            let x = bob
                 .lock_guard()
                 .await
                 .create_transaction(vec![].into(), fee, in_seven_months, config)
                 .await
                 .unwrap()
                 .transaction;
-            tx
+            x
         }
 
         #[traced_test]

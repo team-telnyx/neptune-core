@@ -1465,38 +1465,33 @@ impl WalletState {
     ///
     /// Requested amount `total_spend` must include fees that are paid in the
     /// transaction.
-    pub(crate) async fn allocate_sufficient_input_funds(
+    ///
+    /// The argument `utxo_filter` is an optional predicate which, if set,
+    /// filters for UTXOs where the predicate evaluates to true. If not set,
+    /// all UTXOs are allowed.
+    pub(crate) async fn allocate_sufficient_input_funds<F>(
         &self,
         total_spend: NativeCurrencyAmount,
         tip_digest: Digest,
         mutator_set_accumulator: &MutatorSetAccumulator,
         timestamp: Timestamp,
-    ) -> Result<Vec<UnlockedUtxo>> {
+        utxo_filter: Option<F>,
+    ) -> Result<Vec<UnlockedUtxo>>
+    where
+        F: Fn(&Utxo) -> bool,
+    {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self
             .get_wallet_status(tip_digest, mutator_set_accumulator)
             .await;
 
-        // First check that we have enough. Otherwise, return an error.
-        let confirmed_available_amount_without_mempool_spends = self
-            .confirmed_available_balance(&wallet_status, timestamp)
-            .checked_sub(
-                &self
-                    .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
-                    .sum(),
-            )
-            .expect("balance must never be negative");
-        if confirmed_available_amount_without_mempool_spends < total_spend {
-            bail!(
-                "Insufficient funds. Requested: {}, Available: {}",
-                total_spend,
-                confirmed_available_amount_without_mempool_spends,
-            );
-        }
-
+        // Start selecting inputs.
+        // If there aren't enough inputs, we will discover after the next loop.
+        // We handle this error gracefully where we catch it, if we catch it.
         let mut input_funds = vec![];
+        let mut total_available_amount_unfiltered = NativeCurrencyAmount::zero();
+        let mut total_available_amount_filtered_ignoring_mempool = NativeCurrencyAmount::zero();
         let mut allocated_amount = NativeCurrencyAmount::zero();
         let index_sets_of_inputs_in_mempool_txs: HashSet<AbsoluteIndexSet> = self
             .mempool_spent_utxos
@@ -1505,6 +1500,8 @@ impl WalletState {
             .map(|(_, absi, _)| *absi)
             .collect();
         for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
+            let utxo_amount = wallet_status_element.utxo.get_native_currency_amount();
+
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
                 break;
@@ -1515,41 +1512,56 @@ impl WalletState {
                 continue;
             }
 
+            // Don't use inputs that we can't spend
+            let Some(spending_key) = self.find_spending_key_for_utxo(&wallet_status_element.utxo)
+            else {
+                warn!(
+                    "spending key not found for utxo: {:?}",
+                    wallet_status_element.utxo
+                );
+                continue;
+            };
+
+            // Don't use inputs that the caller wants to exclude
+            total_available_amount_unfiltered = total_available_amount_unfiltered + utxo_amount;
+            if let Some(filter) = &utxo_filter {
+                if !filter(&wallet_status_element.utxo) {
+                    continue;
+                }
+            }
+
             // Don't use inputs that are already spent by txs in mempool.
+            total_available_amount_filtered_ignoring_mempool =
+                total_available_amount_filtered_ignoring_mempool + utxo_amount;
             let absolute_index_set =
                 membership_proof.compute_indices(Tip5::hash(&wallet_status_element.utxo));
             if index_sets_of_inputs_in_mempool_txs.contains(&absolute_index_set) {
                 continue;
             }
 
-            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
-                Some(k) => k,
-                None => {
-                    warn!(
-                        "spending key not found for utxo: {:?}",
-                        wallet_status_element.utxo
-                    );
-                    continue;
-                }
-            };
-
+            // Select the input
             input_funds.push(UnlockedUtxo::unlock(
                 wallet_status_element.utxo.clone(),
                 spending_key,
                 membership_proof.clone(),
             ));
-            allocated_amount =
-                allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
+            allocated_amount = allocated_amount + utxo_amount;
         }
 
-        // Sanity check. Shouldn't be possible to hit because of above balance
-        // check that also takes mempool into account.
-        assert!(
-            allocated_amount >= total_spend,
-            "UTXO allocation failed. This should not be possible. Requested: {}, Available: {}",
-            total_spend,
-            confirmed_available_amount_without_mempool_spends,
-        );
+        // If there aren't enough funds, catch and report error gracefully
+        if allocated_amount < total_spend {
+            bail!(
+                "UTXO allocation failed.\n\
+                Requested: {}\n\
+                Available, unfiltered: {}\n\
+                Avaialble, filtered but ignoring mempool: {}\n\
+                Allocated: {}",
+                total_spend,
+                total_available_amount_unfiltered,
+                total_available_amount_filtered_ignoring_mempool,
+                allocated_amount
+            )
+        }
 
         Ok(input_funds)
     }
@@ -1591,7 +1603,7 @@ impl WalletState {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use generation_address::GenerationSpendingKey;
     use rand::random;
     use rand::Rng;
@@ -1620,6 +1632,30 @@ mod tests {
         pub(crate) async fn clear_raw_hash_keys(&mut self) {
             self.known_raw_hash_lock_keys.clear();
             self.wallet_db.guesser_preimages_mut().clear().await;
+        }
+
+        /// Convenience wrapper around [`Self::allocate_sufficient_input_funds`]
+        /// that supplies the default filte predicate, which is the constant `true`
+        /// function.
+        //
+        // It would be cleaner to call the one interface with `None`. However, rust
+        // is (at time of writing) not smart enough to infer the type of `None` in
+        // that context, resulting in syntactic vomit.
+        pub(crate) async fn allocate_sufficient_input_funds_nofilter(
+            &self,
+            total_spend: NativeCurrencyAmount,
+            tip_digest: Digest,
+            mutator_set_accumulator: &MutatorSetAccumulator,
+            timestamp: Timestamp,
+        ) -> Result<Vec<UnlockedUtxo>> {
+            self.allocate_sufficient_input_funds(
+                total_spend,
+                tip_digest,
+                mutator_set_accumulator,
+                timestamp,
+                Some(|_utxo: &Utxo| true),
+            )
+            .await
         }
     }
 
@@ -1713,11 +1749,11 @@ mod tests {
         assert!(
             alice
                 .wallet_state
-                .allocate_sufficient_input_funds(
+                .allocate_sufficient_input_funds_nofilter(
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
-                    launch_timestamp
+                    launch_timestamp,
                 )
                 .await
                 .is_err(),
@@ -1726,11 +1762,11 @@ mod tests {
         assert!(
             alice
                 .wallet_state
-                .allocate_sufficient_input_funds(
+                .allocate_sufficient_input_funds_nofilter(
                     one_coin,
                     genesis_digest,
                     &mutator_set_accumulator_after_genesis,
-                    released_timestamp
+                    released_timestamp,
                 )
                 .await
                 .is_ok(),
@@ -1761,7 +1797,7 @@ mod tests {
 
         let input_utxos = alice
             .wallet_state
-            .allocate_sufficient_input_funds(
+            .allocate_sufficient_input_funds_nofilter(
                 one_coin,
                 block1.hash(),
                 &block1.mutator_set_accumulator_after(),
