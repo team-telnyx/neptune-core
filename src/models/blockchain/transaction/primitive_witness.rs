@@ -377,7 +377,7 @@ impl PrimitiveWitness {
 
             if let Err(e) = run_res {
                 warn!(
-                    "Failed to verify type script {{type_script_hash}} of \
+                    "Failed to verify type script {type_script_hash} of \
                 transaction. Got: \"{e}\""
                 );
                 return false;
@@ -893,6 +893,10 @@ pub mod neptune_arbitrary {
                         salted_output_utxos: salted_output_utxos.clone(),
                         kernel: kernel.clone(),
                     };
+                    println!("NativeCurrencyWitnessMemory:");
+                    let ncwm: crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitnessMemory =
+                        (&native_currency_type_script_witness).into();
+                    println!("ncwm: {ncwm:#?}");
                     type_scripts_and_witnesses
                         .push(native_currency_type_script_witness.type_script_and_witness());
                 }
@@ -1062,8 +1066,10 @@ mod test {
     use proptest::prelude::BoxedStrategy;
     use proptest::prop_assert;
     use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
@@ -1701,6 +1707,115 @@ mod test {
         prop_assert!(
             TransactionProof::Witness(updated_pw)
                 .verify(new_kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_0_0() {
+        let num_inputs = 0;
+        let num_outputs = 0;
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let kernel_hash = primitive_witness.kernel.mast_hash();
+        assert!(
+            TransactionProof::Witness(primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_0_1() {
+        let num_inputs = 0;
+        let num_outputs = 1;
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let kernel_hash = primitive_witness.kernel.mast_hash();
+        let mut memory = primitive_witness.type_scripts_and_witnesses[0]
+            .nondeterminism()
+            .ram
+            .clone()
+            .into_iter()
+            .collect_vec();
+        memory.sort_by_key(|(k, _v)| k.value());
+        println!(
+            "TS witness, memory:\n{}",
+            memory
+                .into_iter()
+                .map(|(k, v)| format!("({k} => {v})"))
+                .join("\n")
+        );
+        assert!(
+            TransactionProof::Witness(primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_1_0() {
+        let num_inputs = 1;
+        let num_outputs = 0;
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let kernel_hash = primitive_witness.kernel.mast_hash();
+        assert!(
+            TransactionProof::Witness(primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_1_1() {
+        let num_inputs = 1;
+        let num_outputs = 1;
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let kernel_hash = primitive_witness.kernel.mast_hash();
+        assert!(
+            TransactionProof::Witness(primitive_witness)
+                .verify(kernel_hash)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn arb_is_valid_unit_test_2_2() {
+        let num_inputs = 2;
+        let num_outputs = 2;
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let kernel_hash = primitive_witness.kernel.mast_hash();
+        assert!(
+            TransactionProof::Witness(primitive_witness)
+                .verify(kernel_hash)
                 .await
         );
     }

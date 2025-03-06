@@ -234,11 +234,11 @@ impl ConsensusProgram for NativeCurrency {
             hint native_currency_witness_ptr = stack[0]
             // _ [txkmh] *ncw
 
-            dup 0
-            call {audit_preloaded_data}
-            // _ [txkmh] *ncw witness_size
+            // dup 0
+            // call {audit_preloaded_data}
+            // // _ [txkmh] *ncw witness_size
 
-            pop 1
+            // pop 1
             // _ [txkmh] *ncw
 
             /* Divine and authenticate coinbase field */
@@ -945,7 +945,7 @@ impl From<PrimitiveWitness> for NativeCurrencyWitness {
 /// Factored out since this makes auditing the preloaded data much cheaper as
 /// we avoid having to audit the [TransactionKernel].
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
-struct NativeCurrencyWitnessMemory {
+pub struct NativeCurrencyWitnessMemory {
     salted_input_utxos: SaltedUtxos,
     salted_output_utxos: SaltedUtxos,
     coinbase: Option<NativeCurrencyAmount>,
