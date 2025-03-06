@@ -1487,7 +1487,7 @@ impl WalletState {
         utxo_filter: Option<F>,
     ) -> Result<Vec<UnlockedUtxo>>
     where
-        F: Fn(&Utxo) -> bool,
+        F: Fn(&UnlockedUtxo) -> bool,
     {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
@@ -1531,10 +1531,17 @@ impl WalletState {
                 continue;
             };
 
+            // Create the transaction input object
+            let unlocked_utxo = UnlockedUtxo::unlock(
+                wallet_status_element.utxo.clone(),
+                spending_key,
+                membership_proof.clone(),
+            );
+
             // Don't use inputs that the caller wants to exclude
             total_available_amount_unfiltered = total_available_amount_unfiltered + utxo_amount;
             if let Some(filter) = &utxo_filter {
-                if !filter(&wallet_status_element.utxo) {
+                if !filter(&unlocked_utxo) {
                     continue;
                 }
             }
@@ -1549,11 +1556,7 @@ impl WalletState {
             }
 
             // Select the input
-            input_funds.push(UnlockedUtxo::unlock(
-                wallet_status_element.utxo.clone(),
-                spending_key,
-                membership_proof.clone(),
-            ));
+            input_funds.push(unlocked_utxo);
             allocated_amount = allocated_amount + utxo_amount;
         }
 
@@ -1662,7 +1665,7 @@ mod test {
                 tip_digest,
                 mutator_set_accumulator,
                 timestamp,
-                Some(|_utxo: &Utxo| true),
+                Some(|_utxo: &UnlockedUtxo| true),
             )
             .await
         }

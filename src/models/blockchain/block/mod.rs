@@ -1013,6 +1013,7 @@ impl Block {
 #[cfg(test)]
 pub(crate) mod block_tests {
     use std::collections::HashMap;
+    use std::collections::HashSet;
 
     use bytesize::ByteSize;
     use rand::random;
@@ -1037,6 +1038,7 @@ pub(crate) mod block_tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::wallet_state::StrongUtxoKey;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
@@ -1831,6 +1833,7 @@ pub(crate) mod block_tests {
             .unwrap();
 
             // for all own UTXOs, spend to self
+            let mut avoidable_utxos = HashSet::new();
             for _ in 0..i {
                 // create a transaction spending it to self
                 let change_key = alice

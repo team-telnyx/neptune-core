@@ -4,16 +4,16 @@ use std::fmt::Result;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
+use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
 
 /// Custom trait capturing the closure for selecting UTXOs.
-pub(crate) trait UtxoSelector: Fn(&Utxo) -> bool + Send + Sync + 'static {}
-impl<T> UtxoSelector for T where T: Fn(&Utxo) -> bool + Send + Sync + 'static {}
+pub(crate) trait UtxoSelector: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static {}
+impl<T> UtxoSelector for T where T: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static {}
 
 /// Wrapper around the closure type for selecting UTXOs. Purpose: allow
 /// `derive(Debug)` and `derive(Clone)` on structs that have this closure as a
@@ -117,7 +117,7 @@ impl<'a> TxCreationConfig<'a> {
     /// When selecting UTXOs, filter them through the given closure.
     pub(crate) fn select_utxos<F>(mut self, selector: F) -> Self
     where
-        F: Fn(&Utxo) -> bool + Send + Sync + 'static,
+        F: Fn(&UnlockedUtxo) -> bool + Send + Sync + 'static,
     {
         self.select_utxos = Some(DebuggableUtxoSelector(Box::new(selector)));
         self
