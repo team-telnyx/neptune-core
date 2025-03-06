@@ -146,6 +146,15 @@ impl StrongUtxoKey {
     }
 }
 
+impl From<&UnlockedUtxo> for StrongUtxoKey {
+    fn from(unlocked_utxo: &UnlockedUtxo) -> Self {
+        Self::new(
+            unlocked_utxo.addition_record(),
+            unlocked_utxo.mutator_set_mp().aocl_leaf_index,
+        )
+    }
+}
+
 impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
