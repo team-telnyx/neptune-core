@@ -293,10 +293,15 @@ impl PrimitiveWitness {
             })
             .await;
 
-            if let Err(e) = result {
-                warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
+            let Ok(run_res) = result else {
+                warn!("Failed to spawn task for verifying lock script.");
                 return false;
             };
+
+            if let Err(e) = run_res {
+                warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
+                return false;
+            }
         }
 
         // Verify correct computation of removal records. Also, collect the removal
@@ -365,8 +370,16 @@ impl PrimitiveWitness {
             })
             .await;
 
-            if let Err(e) = result {
-                warn!("Type script {type_script_hash} not satisfied for transaction: {e}");
+            let Ok(run_res) = result else {
+                warn!("Failed to spawn task for verifying type script.");
+                return false;
+            };
+
+            if let Err(e) = run_res {
+                warn!(
+                    "Failed to verify type script {{type_script_hash}} of \
+                transaction. Got: \"{e}\""
+                );
                 return false;
             }
         }
@@ -417,7 +430,9 @@ impl PrimitiveWitness {
     /// Update a primitive witness to be valid under a new mutator set.
     ///
     /// Assumes initial primitive witness is valid, and that inputs were not
-    /// spent in the supplied mutator set update. Otherwise panics.
+    /// spent in the supplied mutator set update. Otherwise panics. Also
+    /// assumes that the lock script witnesses are still valid under the new
+    /// mutator set.
     pub(crate) fn update_with_new_ms_data(self, mutator_set_update: MutatorSetUpdate) -> Self {
         let new_addition_records = mutator_set_update.additions;
         let mut new_removal_records = mutator_set_update.removals;
@@ -497,6 +512,22 @@ impl PrimitiveWitness {
 
         primitive_witness.kernel = kernel.clone();
         primitive_witness.mutator_set_accumulator = msa_state.clone();
+
+        // Set type_scripts_and_witnesses field from other fields in primitive witness.
+        let type_scripts_and_witnesses = primitive_witness
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|ts_and_w| {
+                match_type_script_and_generate_witness(
+                    ts_and_w.program.hash(),
+                    kernel.clone(),
+                    primitive_witness.input_utxos.clone(),
+                    primitive_witness.output_utxos.clone(),
+                )
+                .expect("type script hash should be known.")
+            })
+            .collect_vec();
+        primitive_witness.type_scripts_and_witnesses = type_scripts_and_witnesses;
 
         primitive_witness
     }
