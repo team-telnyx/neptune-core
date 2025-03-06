@@ -1858,17 +1858,23 @@ pub(crate) mod block_tests {
                     true,
                 )]
                 .into();
+                let avoidable_utxos_for_closure = avoidable_utxos.clone();
                 let config = TxCreationConfig::default()
                     .recover_change_on_chain(change_key.into())
                     .with_prover_capability(TxProvingCapability::SingleProof)
-                    .use_job_queue(&job_queue);
-                let self_spending_transaction = alice
+                    .use_job_queue(&job_queue)
+                    .select_utxos(move |unlocked_utxo| {
+                        !avoidable_utxos_for_closure.contains(&StrongUtxoKey::from(unlocked_utxo))
+                    })
+                    .track_selection();
+                let transaction_creation_artifacts = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction(tx_outputs, NativeCurrencyAmount::coins(0), now, config)
                     .await
-                    .unwrap()
-                    .transaction;
+                    .unwrap();
+                let self_spending_transaction = transaction_creation_artifacts.transaction;
+                avoidable_utxos.extend(transaction_creation_artifacts.selection);
 
                 // merge that transaction in
                 transaction = transaction
@@ -1916,6 +1922,7 @@ pub(crate) mod block_tests {
                 "block is valid? {:?}",
                 block_is_valid.map(|_| "yes".to_string())
             );
+            println!();
             assert!(block_is_valid.is_ok());
 
             // update state with new block
