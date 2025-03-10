@@ -1,0 +1,39 @@
+[swe-agent]
+# GPU Mining Configuration Instructions
+primary_language = C++
+code_style = Google
+test_framework = GTest
+
+# Build System
+build_system = CMake
+cmake_minimum_version = 3.12
+
+# Dependencies
+required_packages = rocm-dev, hip-dev, opencl-dev
+
+# GPU Support Guidelines
+gpu_target = AMD
+supported_frameworks = HIP, ROCm, OpenCL
+optimization_level = O3
+
+# Code Organization
+src_dir = src
+test_dir = tests
+gpu_src_dir = src/gpu
+
+# Testing Requirements
+unit_test_coverage = 80
+gpu_test_required = true
+
+# Documentation
+doc_style = Doxygen
+required_docs = API, Performance, Build Instructions
+
+# Performance Requirements
+min_hashrate_improvement = 200%  # Compared to CPU implementation
+target_memory_usage = 8GB
+
+# Code Review Guidelines
+reviewers_required = 2
+gpu_expert_review = required
+performance_review = required
