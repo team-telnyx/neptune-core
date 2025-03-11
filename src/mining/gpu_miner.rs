@@ -1,13 +1,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 use std::thread;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 use rocm_sys::*;
 use hip_runtime_sys::*;
 use twenty_first::math::digest::Digest;
 use tracing::*;
 use rand::Rng;
 
-use super::gpu_kernel::MiningKernel;
+use super::gpu_kernel::{MiningKernel, create_gpu_kernel_source};
+
+// Flag to track if we've attempted to compile the GPU kernel
+static mut GPU_KERNEL_COMPILED: bool = false;
 
 pub struct GpuMiner {
     device: i32,
@@ -15,6 +21,7 @@ pub struct GpuMiner {
     stream: Stream,
     device_name: String,
     compute_units: i32,
+    is_using_gpu: bool,
 }
 
 struct Context {
@@ -91,7 +98,16 @@ impl GpuMiner {
             let context = Arc::new(Context::new()?);
             let stream = Stream::new(hipStreamNonBlocking)?;
 
-            info!("Initialized GPU miner on device {}: {} with {} compute units", device_id, device_name, compute_units);
+            // Try to compile the GPU kernel if not already done
+            let is_using_gpu = Self::ensure_gpu_kernel_compiled();
+
+            if is_using_gpu {
+                info!("Initialized GPU miner on device {}: {} with {} compute units (using GPU acceleration)", 
+                    device_id, device_name, compute_units);
+            } else {
+                warn!("Initialized GPU miner on device {}: {} with {} compute units (using CPU fallback)", 
+                    device_id, device_name, compute_units);
+            }
 
             Ok(Self {
                 device: device_id,
@@ -99,12 +115,80 @@ impl GpuMiner {
                 stream,
                 device_name,
                 compute_units,
+                is_using_gpu,
             })
         }
     }
     
-    pub fn get_device_info(&self) -> (i32, &str, i32) {
-        (self.device, &self.device_name, self.compute_units)
+    // Ensure the GPU kernel is compiled and available
+    unsafe fn ensure_gpu_kernel_compiled() -> bool {
+        if !GPU_KERNEL_COMPILED {
+            GPU_KERNEL_COMPILED = true;
+            
+            // Check if the kernel file already exists
+            if !Path::new("mining_kernel.hsaco").exists() {
+                // Generate the kernel source code
+                let kernel_source = create_gpu_kernel_source();
+                
+                // Write the kernel source to a file
+                match File::create("mining_kernel.cpp") {
+                    Ok(mut file) => {
+                        if let Err(e) = file.write_all(kernel_source.as_bytes()) {
+                            error!("Failed to write kernel source: {}", e);
+                            return false;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to create kernel source file: {}", e);
+                        return false;
+                    }
+                }
+                
+                // Try to compile the kernel using hipcc
+                info!("Attempting to compile GPU kernel with hipcc...");
+                let compile_status = std::process::Command::new("hipcc")
+                    .args(&[
+                        "--genco",
+                        "-O3",
+                        "-fgpu-rdc",
+                        "-o", "mining_kernel.hsaco",
+                        "mining_kernel.cpp"
+                    ])
+                    .status();
+                
+                match compile_status {
+                    Ok(status) => {
+                        if !status.success() {
+                            error!("Failed to compile GPU kernel: hipcc exited with status {}", status);
+                            return false;
+                        }
+                        info!("Successfully compiled GPU kernel");
+                    }
+                    Err(e) => {
+                        error!("Failed to execute hipcc: {}", e);
+                        return false;
+                    }
+                }
+            } else {
+                info!("Using existing GPU kernel binary");
+            }
+            
+            // Check if the compiled kernel exists
+            if Path::new("mining_kernel.hsaco").exists() {
+                info!("GPU kernel is available for mining");
+                return true;
+            } else {
+                warn!("GPU kernel is not available, will use CPU fallback");
+                return false;
+            }
+        }
+        
+        // Return true if the kernel file exists
+        Path::new("mining_kernel.hsaco").exists()
+    }
+
+    pub fn get_device_info(&self) -> (i32, &str, i32, bool) {
+        (self.device, &self.device_name, self.compute_units, self.is_using_gpu)
     }
 
     pub fn mine_block(
@@ -179,7 +263,11 @@ impl GpuMiner {
             // Create and launch kernel
             let kernel = MiningKernel::new(difficulty, nonce_start, nonce_range);
             
-            info!("Launching GPU mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
+            if self.is_using_gpu {
+                info!("Launching GPU mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
+            } else {
+                info!("Launching CPU fallback mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
+            }
             
             if let Err(e) = kernel.launch(
                 self.stream.stream,
@@ -223,6 +311,13 @@ impl GpuMiner {
                     self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
                     return Err("Failed to copy nonce from device".to_string());
                 }
+                
+                if self.is_using_gpu {
+                    info!("GPU found valid nonce!");
+                } else {
+                    info!("CPU fallback found valid nonce!");
+                }
+                
                 Some(nonce)
             } else {
                 None

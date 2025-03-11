@@ -246,17 +246,30 @@ fn guess_worker(
                 if device_id < count {
                     match GpuMiner::new(device_id) {
                         Ok(miner) => {
-                            let (dev_id, name, compute_units) = miner.get_device_info();
-                            info!(
-                                "Using GPU device {}: {} with {} compute units for mining block {} with {} outputs and difficulty {}. Target: {}",
-                                dev_id,
-                                name,
-                                compute_units,
-                                block.header().height,
-                                block.body().transaction_kernel.outputs.len(),
-                                previous_block_header.difficulty,
-                                threshold.to_hex()
-                            );
+                            let (dev_id, name, compute_units, is_using_gpu) = miner.get_device_info();
+                            if is_using_gpu {
+                                info!(
+                                    "Using GPU device {}: {} with {} compute units for mining block {} with {} outputs and difficulty {}. Target: {}",
+                                    dev_id,
+                                    name,
+                                    compute_units,
+                                    block.header().height,
+                                    block.body().transaction_kernel.outputs.len(),
+                                    previous_block_header.difficulty,
+                                    threshold.to_hex()
+                                );
+                            } else {
+                                info!(
+                                    "Using GPU device {}: {} with {} compute units (CPU fallback mode) for mining block {} with {} outputs and difficulty {}. Target: {}",
+                                    dev_id,
+                                    name,
+                                    compute_units,
+                                    block.header().height,
+                                    block.body().transaction_kernel.outputs.len(),
+                                    previous_block_header.difficulty,
+                                    threshold.to_hex()
+                                );
+                            }
                             gpu_miner = Some(miner);
                         }
                         Err(e) => {
