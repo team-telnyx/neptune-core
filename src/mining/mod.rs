@@ -1,4 +1,5 @@
-mod gpu_kernel;
-mod gpu_miner;
+// Use mock implementation for testing
+mod mock_impl;
 
-pub use gpu_miner::GpuMiner;
+pub use mock_impl::GpuMiner;
+pub use mock_impl::create_gpu_kernel_source;
