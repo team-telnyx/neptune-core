@@ -16,6 +16,7 @@ pub mod locks;
 pub mod macros;
 pub mod main_loop;
 pub mod mine_loop;
+pub mod mining;
 pub mod models;
 pub mod peer_loop;
 pub mod prelude;

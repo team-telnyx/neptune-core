@@ -241,7 +241,10 @@ fn guess_worker(
         
         // Check if GPUs are available
         match GpuMiner::get_device_count() {
-            Ok(count) if count > 0 => {
+            Ok(count) => {
+                if count <= 0 {
+                    warn!("No GPU devices found. Falling back to CPU mining.");
+                } else {
                 let device_id = gpu_device_id.unwrap_or(0);
                 if device_id < count {
                     match GpuMiner::new(device_id) {
@@ -279,9 +282,7 @@ fn guess_worker(
                 } else {
                     warn!("Invalid GPU device ID: {}. Available devices: {}. Falling back to CPU mining.", device_id, count);
                 }
-            }
-            Ok(0) => {
-                warn!("No GPU devices found. Falling back to CPU mining.");
+                }
             }
             Err(e) => {
                 warn!("Failed to get GPU device count: {}. Falling back to CPU mining.", e);
@@ -307,7 +308,7 @@ fn guess_worker(
             }
             
             // Run the GPU mining kernel
-            match miner.mine_block(kernel_path, header_path, threshold, prev_difficulty.0) {
+            match miner.mine_block(kernel_path, header_path, threshold, prev_difficulty.as_u64()) {
                 Ok(Some(nonce)) => {
                     info!("GPU found valid nonce!");
                     found_nonce = Some(nonce);
@@ -339,7 +340,7 @@ fn guess_worker(
                 &sender,
                 block.header().height,
                 block.body().transaction_kernel.outputs.len(),
-                previous_block_header.difficulty,
+                previous_block_header.difficulty.as_u64(),
             )
         }
     } else {
@@ -353,7 +354,7 @@ fn guess_worker(
             &sender,
             block.header().height,
             block.body().transaction_kernel.outputs.len(),
-            previous_block_header.difficulty,
+            previous_block_header.difficulty.as_u64(),
         )
     };
 

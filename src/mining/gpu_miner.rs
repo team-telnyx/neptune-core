@@ -1,12 +1,10 @@
 use std::sync::Arc;
-use std::time::Duration;
-use std::thread;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use rocm_sys::*;
-use hip_runtime_sys::*;
-use twenty_first::math::digest::Digest;
+// Use our mock implementation instead of the real HIP runtime
+use super::hip_mock::*;
+use crate::prelude::twenty_first::math::digest::Digest;
 use tracing::*;
 use rand::Rng;
 
@@ -189,16 +187,59 @@ impl GpuMiner {
                     }
                 }
                 
-                // Try to compile the kernel using hipcc
-                info!("Compiling GPU kernel with hipcc...");
+                // Get ROCm version for compiler flags
+                let rocm_version = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' || echo 'unknown'")
+                    .output()
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "unknown".to_string());
+                
+                info!("Detected ROCm version: {}", rocm_version);
+                
+                // Check for AMD MI100 GPUs and add specific optimization flags
+                let mut has_mi100 = false;
+                let mut device_count = 0;
+                if hipGetDeviceCount(&mut device_count) == hipSuccess {
+                    for device_id in 0..device_count {
+                        let mut name_buffer = [0u8; 256];
+                        if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) == hipSuccess {
+                            let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+                                .to_string_lossy();
+                            
+                            if device_name.contains("MI100") {
+                                has_mi100 = true;
+                                info!("🚀 Detected AMD MI100 GPU, will use specific optimizations");
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Prepare compiler flags based on detected hardware
+                let mut compiler_args = vec![
+                    "--genco".to_string(),
+                    "-O3".to_string(),
+                    "-fgpu-rdc".to_string(),
+                ];
+                
+                // Add MI100-specific optimizations if detected
+                if has_mi100 {
+                    compiler_args.push("-march=gfx908".to_string());
+                    compiler_args.push("-mcumode".to_string());
+                    compiler_args.push("--offload-arch=gfx908".to_string());
+                    compiler_args.push("-mwavefrontsize64".to_string());
+                }
+                
+                // Add output file and source file
+                compiler_args.push("-o".to_string());
+                compiler_args.push("mining_kernel.hsaco".to_string());
+                compiler_args.push("mining_kernel.cpp".to_string());
+                
+                // Try to compile the kernel using hipcc with appropriate flags
+                info!("Compiling GPU kernel with hipcc using flags: {:?}", compiler_args);
                 let compile_output = std::process::Command::new("hipcc")
-                    .args(&[
-                        "--genco",
-                        "-O3",
-                        "-fgpu-rdc",
-                        "-o", "mining_kernel.hsaco",
-                        "mining_kernel.cpp"
-                    ])
+                    .args(&compiler_args)
                     .output();
                 
                 match compile_output {
@@ -330,13 +371,28 @@ impl GpuMiner {
             
             // Generate random nonce start
             let nonce_start = rand::thread_rng().gen::<u64>();
-            let nonce_range = 1_000_000_000; // 1 billion nonces per kernel launch
+            
+            // Adjust nonce range based on device capabilities
+            // MI100 GPUs can handle larger batches
+            let nonce_range = if self.device_name.contains("MI100") {
+                // MI100 has 120 compute units, can handle larger batches
+                2_000_000_000 // 2 billion nonces per kernel launch for MI100
+            } else {
+                1_000_000_000 // 1 billion nonces for other GPUs
+            };
             
             // Create and launch kernel
             let kernel = MiningKernel::new(difficulty, nonce_start, nonce_range);
             
             if self.is_using_gpu {
-                info!("Launching GPU mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
+                info!("Launching GPU mining kernel on {} with {} compute units", 
+                      self.device_name, self.compute_units);
+                info!("Processing {} nonces starting from {}", nonce_range, nonce_start);
+                
+                // Log additional information for MI100 GPUs
+                if self.device_name.contains("MI100") {
+                    info!("Using optimized kernel for AMD MI100 GPU architecture");
+                }
             } else {
                 error!("FATAL: GPU mining is not available, cannot proceed with CPU fallback");
                 panic!("GPU mining is not available. Please check GPU initialization logs for details.");
@@ -385,7 +441,7 @@ impl GpuMiner {
                     return Err("Failed to copy nonce from device".to_string());
                 }
                 
-                info!("🎉 GPU found valid nonce!")
+                info!("🎉 GPU found valid nonce!");
                 
                 Some(nonce)
             } else {
