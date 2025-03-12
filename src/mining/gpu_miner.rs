@@ -63,21 +63,36 @@ impl Stream {
 impl GpuMiner {
     pub fn new(device_id: i32) -> Result<Self, String> {
         unsafe {
+            // Get device count and log information about available devices
             let mut device_count = 0;
-            if hipGetDeviceCount(&mut device_count) != hipSuccess {
-                return Err("Failed to get GPU device count".to_string());
+            let status = hipGetDeviceCount(&mut device_count);
+            if status != hipSuccess {
+                error!("Failed to get GPU device count: error code {}", status);
+                return Err(format!("Failed to get GPU device count: error code {}", status));
             }
+            
+            info!("Initializing GPU miner. Found {} GPU device(s)", device_count);
             
             if device_count == 0 {
                 return Err("No GPU devices found".to_string());
             }
             
+            // Log information about all available devices
+            for dev_id in 0..device_count {
+                Self::log_device_info(dev_id)?;
+            }
+            
+            // Validate the requested device ID
             if device_id >= device_count {
                 return Err(format!("Invalid device ID {}. Available devices: {}", device_id, device_count));
             }
 
-            if hipSetDevice(device_id) != hipSuccess {
-                return Err("Failed to set GPU device".to_string());
+            // Set the active device
+            info!("Setting active GPU device to {}", device_id);
+            let status = hipSetDevice(device_id);
+            if status != hipSuccess {
+                error!("Failed to set GPU device {}: error code {}", device_id, status);
+                return Err(format!("Failed to set GPU device {}: error code {}", device_id, status));
             }
 
             // Get device name and compute units
@@ -95,17 +110,20 @@ impl GpuMiner {
                 return Err("Failed to get compute unit count".to_string());
             }
 
+            // Create context and stream
+            info!("Creating HIP context and stream for device {}", device_id);
             let context = Arc::new(Context::new()?);
             let stream = Stream::new(hipStreamNonBlocking)?;
 
             // Try to compile the GPU kernel if not already done
+            info!("Ensuring GPU kernel is compiled and available");
             let is_using_gpu = Self::ensure_gpu_kernel_compiled();
 
             if is_using_gpu {
-                info!("Initialized GPU miner on device {}: {} with {} compute units (using GPU acceleration)", 
+                info!("✅ Successfully initialized GPU miner on device {}: {} with {} compute units (using GPU acceleration)", 
                     device_id, device_name, compute_units);
             } else {
-                warn!("Initialized GPU miner on device {}: {} with {} compute units (using CPU fallback)", 
+                warn!("⚠️ Initialized GPU miner on device {}: {} with {} compute units (using CPU fallback)", 
                     device_id, device_name, compute_units);
             }
 
@@ -127,15 +145,21 @@ impl GpuMiner {
             
             // Check if the kernel file already exists
             if !Path::new("mining_kernel.hsaco").exists() {
+                info!("No pre-compiled GPU kernel found, will generate and compile one");
+                
                 // Generate the kernel source code
                 let kernel_source = create_gpu_kernel_source();
+                info!("Generated GPU kernel source code ({} bytes)", kernel_source.len());
                 
                 // Write the kernel source to a file
                 match File::create("mining_kernel.cpp") {
                     Ok(mut file) => {
-                        if let Err(e) = file.write_all(kernel_source.as_bytes()) {
-                            error!("Failed to write kernel source: {}", e);
-                            return false;
+                        match file.write_all(kernel_source.as_bytes()) {
+                            Ok(_) => info!("Successfully wrote kernel source to mining_kernel.cpp"),
+                            Err(e) => {
+                                error!("Failed to write kernel source: {}", e);
+                                return false;
+                            }
                         }
                     }
                     Err(e) => {
@@ -144,9 +168,29 @@ impl GpuMiner {
                     }
                 }
                 
+                // Check if hipcc is available
+                let hipcc_check = std::process::Command::new("which")
+                    .arg("hipcc")
+                    .output();
+                
+                match hipcc_check {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            error!("hipcc compiler not found in PATH. Cannot compile GPU kernel.");
+                            return false;
+                        }
+                        let hipcc_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        info!("Found hipcc compiler at: {}", hipcc_path);
+                    }
+                    Err(e) => {
+                        error!("Failed to check for hipcc compiler: {}", e);
+                        return false;
+                    }
+                }
+                
                 // Try to compile the kernel using hipcc
-                info!("Attempting to compile GPU kernel with hipcc...");
-                let compile_status = std::process::Command::new("hipcc")
+                info!("Compiling GPU kernel with hipcc...");
+                let compile_output = std::process::Command::new("hipcc")
                     .args(&[
                         "--genco",
                         "-O3",
@@ -154,15 +198,20 @@ impl GpuMiner {
                         "-o", "mining_kernel.hsaco",
                         "mining_kernel.cpp"
                     ])
-                    .status();
+                    .output();
                 
-                match compile_status {
-                    Ok(status) => {
-                        if !status.success() {
-                            error!("Failed to compile GPU kernel: hipcc exited with status {}", status);
+                match compile_output {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            error!("Failed to compile GPU kernel: {}", stderr);
                             return false;
                         }
-                        info!("Successfully compiled GPU kernel");
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        if !stdout.is_empty() {
+                            info!("Compiler output: {}", stdout);
+                        }
+                        info!("Successfully compiled GPU kernel to mining_kernel.hsaco");
                     }
                     Err(e) => {
                         error!("Failed to execute hipcc: {}", e);
@@ -170,21 +219,33 @@ impl GpuMiner {
                     }
                 }
             } else {
-                info!("Using existing GPU kernel binary");
+                info!("Using existing GPU kernel binary: mining_kernel.hsaco");
             }
             
-            // Check if the compiled kernel exists
-            if Path::new("mining_kernel.hsaco").exists() {
-                info!("GPU kernel is available for mining");
-                return true;
-            } else {
-                warn!("GPU kernel is not available, will use CPU fallback");
-                return false;
+            // Check if the compiled kernel exists and has non-zero size
+            match std::fs::metadata("mining_kernel.hsaco") {
+                Ok(metadata) => {
+                    let size = metadata.len();
+                    if size > 0 {
+                        info!("GPU kernel is available for mining (size: {} bytes)", size);
+                        return true;
+                    } else {
+                        warn!("GPU kernel file exists but has zero size, will use CPU fallback");
+                        return false;
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get GPU kernel file metadata: {}, will use CPU fallback", e);
+                    return false;
+                }
             }
         }
         
-        // Return true if the kernel file exists
-        Path::new("mining_kernel.hsaco").exists()
+        // Check if the kernel file exists and has non-zero size
+        match std::fs::metadata("mining_kernel.hsaco") {
+            Ok(metadata) => metadata.len() > 0,
+            Err(_) => false
+        }
     }
 
     pub fn get_device_info(&self) -> (i32, &str, i32, bool) {
@@ -359,10 +420,70 @@ impl GpuMiner {
     pub fn get_device_count() -> Result<i32, String> {
         unsafe {
             let mut device_count = 0;
-            if hipGetDeviceCount(&mut device_count) != hipSuccess {
-                return Err("Failed to get GPU device count".to_string());
+            let status = hipGetDeviceCount(&mut device_count);
+            if status != hipSuccess {
+                error!("Failed to get GPU device count: error code {}", status);
+                return Err(format!("Failed to get GPU device count: error code {}", status));
             }
+            
+            info!("Detected {} GPU device(s)", device_count);
+            
+            // Log information about each device
+            for device_id in 0..device_count {
+                Self::log_device_info(device_id)?;
+            }
+            
             Ok(device_count)
+        }
+    }
+    
+    // Log detailed information about a specific GPU device
+    fn log_device_info(device_id: i32) -> Result<(), String> {
+        unsafe {
+            // Get device name
+            let mut name_buffer = [0u8; 256];
+            if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) != hipSuccess {
+                return Err(format!("Failed to get name for device {}", device_id));
+            }
+            
+            let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+                .to_string_lossy()
+                .into_owned();
+                
+            // Get compute units
+            let mut compute_units = 0;
+            if hipDeviceGetAttribute(&mut compute_units, hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount, device_id) != hipSuccess {
+                return Err(format!("Failed to get compute units for device {}", device_id));
+            }
+            
+            // Get total memory
+            let mut total_mem = 0;
+            if hipDeviceTotalMem(&mut total_mem, device_id) != hipSuccess {
+                return Err(format!("Failed to get total memory for device {}", device_id));
+            }
+            
+            // Get clock rate
+            let mut clock_rate = 0;
+            if hipDeviceGetAttribute(&mut clock_rate, hipDeviceAttribute_t_hipDeviceAttributeClockRate, device_id) != hipSuccess {
+                return Err(format!("Failed to get clock rate for device {}", device_id));
+            }
+            
+            // Get PCI bus ID
+            let mut pci_bus_id = [0u8; 16];
+            if hipDeviceGetPCIBusId(pci_bus_id.as_mut_ptr() as *mut i8, pci_bus_id.len() as i32, device_id) != hipSuccess {
+                return Err(format!("Failed to get PCI bus ID for device {}", device_id));
+            }
+            
+            let pci_id = std::ffi::CStr::from_ptr(pci_bus_id.as_ptr() as *const i8)
+                .to_string_lossy()
+                .into_owned();
+            
+            info!("GPU Device #{}: {} (PCI: {})", device_id, device_name, pci_id);
+            info!("  - Compute Units: {}", compute_units);
+            info!("  - Total Memory: {} MB", total_mem / (1024 * 1024));
+            info!("  - Clock Rate: {} MHz", clock_rate / 1000);
+            
+            Ok(())
         }
     }
 }

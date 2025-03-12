@@ -89,27 +89,56 @@ impl MiningKernel {
         GPU_KERNEL_INIT.call_once(|| {
             // Check if HIP runtime is available
             let mut device_count = 0;
-            if hipGetDeviceCount(&mut device_count) != hipSuccess || device_count == 0 {
+            let status = hipGetDeviceCount(&mut device_count);
+            if status != hipSuccess {
+                error!("Failed to get HIP device count: error code {}", status);
+                return;
+            }
+            
+            if device_count == 0 {
                 error!("No HIP devices available for GPU mining");
                 return;
             }
             
-            // In a real implementation, we would compile the kernel at runtime
-            // using hiprtcCreateProgram, hiprtcCompileProgram, etc.
-            // For now, we'll use a placeholder approach that properly marks
-            // the kernel function as a GPU kernel
+            // Log available devices
+            info!("Found {} HIP device(s) for GPU mining", device_count);
+            for device_id in 0..device_count {
+                let mut name_buffer = [0u8; 256];
+                if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) == hipSuccess {
+                    let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+                        .to_string_lossy();
+                    
+                    let mut compute_units = 0;
+                    if hipDeviceGetAttribute(&mut compute_units, hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount, device_id) == hipSuccess {
+                        info!("  Device #{}: {} with {} compute units", device_id, device_name, compute_units);
+                    } else {
+                        info!("  Device #{}: {}", device_id, device_name);
+                    }
+                }
+            }
             
             // Create a module that contains our kernel
-            let module_ptr = self.create_gpu_module().unwrap_or(std::ptr::null_mut());
+            info!("Attempting to create GPU module...");
+            let module_ptr = self.create_gpu_module().unwrap_or_else(|e| {
+                error!("Failed to create GPU module: {}", e);
+                std::ptr::null_mut()
+            });
+            
             if module_ptr.is_null() {
-                error!("Failed to create GPU module");
+                error!("Failed to create GPU module, will use CPU fallback");
                 return;
             }
             
             // Get the kernel function from the module
-            let function_ptr = self.get_kernel_function(module_ptr).unwrap_or(std::ptr::null_mut());
+            info!("Attempting to get kernel function...");
+            let function_ptr = self.get_kernel_function(module_ptr).unwrap_or_else(|e| {
+                error!("Failed to get kernel function: {}", e);
+                hipModuleUnload(module_ptr);
+                std::ptr::null_mut()
+            });
+            
             if function_ptr.is_null() {
-                error!("Failed to get kernel function");
+                error!("Failed to get kernel function, will use CPU fallback");
                 hipModuleUnload(module_ptr);
                 return;
             }
@@ -124,7 +153,7 @@ impl MiningKernel {
         
         if !initialized && GPU_KERNEL_FUNCTION.is_null() {
             // If initialization failed, fall back to CPU implementation
-            info!("Using CPU fallback for mining kernel");
+            warn!("GPU kernel initialization failed, using CPU fallback for mining kernel");
             return Ok(mining_kernel as *const c_void);
         }
         
@@ -133,27 +162,73 @@ impl MiningKernel {
     
     // Create a GPU module that contains our kernel
     unsafe fn create_gpu_module(&self) -> Result<*mut c_void, String> {
-        // In a real implementation, this would compile the kernel source code
-        // and load it as a module. For now, we'll use a placeholder approach.
-        
-        // This is a simplified version - in reality, we would:
-        // 1. Compile the kernel source code using hiprtcCreateProgram, hiprtcCompileProgram
-        // 2. Get the PTX code using hiprtcGetCode
-        // 3. Load the PTX code using hipModuleLoadData
-        
         let mut module = std::ptr::null_mut();
         
-        // Try to load a pre-compiled module if available
-        // In a real implementation, we would compile the kernel at runtime
-        let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
-        
-        if status != hipSuccess {
-            // If loading fails, fall back to CPU implementation
-            warn!("Failed to load GPU module: error code {}. Using CPU fallback.", status);
-            return Err("Failed to load GPU module".to_string());
+        // First, check if a pre-compiled kernel exists
+        if std::path::Path::new("mining_kernel.hsaco").exists() {
+            info!("Found pre-compiled kernel file, attempting to load it");
+            let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
+            
+            if status == hipSuccess {
+                info!("Successfully loaded pre-compiled GPU kernel module");
+                return Ok(module);
+            }
+            
+            warn!("Failed to load pre-compiled GPU module: error code {}. Will try to compile it.", status);
         }
         
-        Ok(module)
+        // If no pre-compiled kernel exists or loading failed, compile it
+        info!("Generating GPU kernel source code");
+        let kernel_source = create_gpu_kernel_source();
+        
+        // Write the kernel source to a file
+        let source_file = "mining_kernel.cpp";
+        match std::fs::write(source_file, kernel_source) {
+            Ok(_) => info!("Successfully wrote kernel source to {}", source_file),
+            Err(e) => {
+                error!("Failed to write kernel source: {}", e);
+                return Err(format!("Failed to write kernel source: {}", e));
+            }
+        }
+        
+        // Try to compile the kernel using hipcc
+        info!("Compiling GPU kernel with hipcc...");
+        let output = std::process::Command::new("hipcc")
+            .args(&[
+                "--genco",
+                "-O3",
+                "-fgpu-rdc",
+                "-o", "mining_kernel.hsaco",
+                source_file
+            ])
+            .output();
+        
+        match output {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!("Failed to compile GPU kernel: {}", stderr);
+                    return Err(format!("Failed to compile GPU kernel: {}", stderr));
+                }
+                
+                info!("Successfully compiled GPU kernel");
+                
+                // Now try to load the compiled module
+                let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
+                
+                if status != hipSuccess {
+                    error!("Failed to load compiled GPU module: error code {}", status);
+                    return Err(format!("Failed to load compiled GPU module: error code {}", status));
+                }
+                
+                info!("Successfully loaded compiled GPU kernel module");
+                Ok(module)
+            },
+            Err(e) => {
+                error!("Failed to execute hipcc: {}", e);
+                return Err(format!("Failed to execute hipcc: {}", e));
+            }
+        }
     }
     
     // Get the kernel function from the module
