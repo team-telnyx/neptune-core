@@ -139,6 +139,7 @@ impl GpuMiner {
     }
     
     // Ensure the GPU kernel is compiled and available
+    // This function will now panic instead of falling back to CPU if GPU initialization fails
     unsafe fn ensure_gpu_kernel_compiled() -> bool {
         if !GPU_KERNEL_COMPILED {
             GPU_KERNEL_COMPILED = true;
@@ -157,14 +158,14 @@ impl GpuMiner {
                         match file.write_all(kernel_source.as_bytes()) {
                             Ok(_) => info!("Successfully wrote kernel source to mining_kernel.cpp"),
                             Err(e) => {
-                                error!("Failed to write kernel source: {}", e);
-                                return false;
+                                error!("FATAL: Failed to write kernel source: {}", e);
+                                panic!("GPU initialization failed: Cannot write kernel source file: {}", e);
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Failed to create kernel source file: {}", e);
-                        return false;
+                        error!("FATAL: Failed to create kernel source file: {}", e);
+                        panic!("GPU initialization failed: Cannot create kernel source file: {}", e);
                     }
                 }
                 
@@ -176,15 +177,15 @@ impl GpuMiner {
                 match hipcc_check {
                     Ok(output) => {
                         if !output.status.success() {
-                            error!("hipcc compiler not found in PATH. Cannot compile GPU kernel.");
-                            return false;
+                            error!("FATAL: hipcc compiler not found in PATH. Cannot compile GPU kernel.");
+                            panic!("GPU initialization failed: hipcc compiler not found in PATH");
                         }
                         let hipcc_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                         info!("Found hipcc compiler at: {}", hipcc_path);
                     }
                     Err(e) => {
-                        error!("Failed to check for hipcc compiler: {}", e);
-                        return false;
+                        error!("FATAL: Failed to check for hipcc compiler: {}", e);
+                        panic!("GPU initialization failed: Cannot check for hipcc compiler: {}", e);
                     }
                 }
                 
@@ -204,8 +205,8 @@ impl GpuMiner {
                     Ok(output) => {
                         if !output.status.success() {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            error!("Failed to compile GPU kernel: {}", stderr);
-                            return false;
+                            error!("FATAL: Failed to compile GPU kernel: {}", stderr);
+                            panic!("GPU initialization failed: Cannot compile GPU kernel: {}", stderr);
                         }
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         if !stdout.is_empty() {
@@ -214,8 +215,8 @@ impl GpuMiner {
                         info!("Successfully compiled GPU kernel to mining_kernel.hsaco");
                     }
                     Err(e) => {
-                        error!("Failed to execute hipcc: {}", e);
-                        return false;
+                        error!("FATAL: Failed to execute hipcc: {}", e);
+                        panic!("GPU initialization failed: Cannot execute hipcc: {}", e);
                     }
                 }
             } else {
@@ -230,21 +231,31 @@ impl GpuMiner {
                         info!("GPU kernel is available for mining (size: {} bytes)", size);
                         return true;
                     } else {
-                        warn!("GPU kernel file exists but has zero size, will use CPU fallback");
-                        return false;
+                        error!("FATAL: GPU kernel file exists but has zero size");
+                        panic!("GPU initialization failed: Kernel file exists but has zero size");
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to get GPU kernel file metadata: {}, will use CPU fallback", e);
-                    return false;
+                    error!("FATAL: Failed to get GPU kernel file metadata: {}", e);
+                    panic!("GPU initialization failed: Cannot access kernel file: {}", e);
                 }
             }
         }
         
         // Check if the kernel file exists and has non-zero size
         match std::fs::metadata("mining_kernel.hsaco") {
-            Ok(metadata) => metadata.len() > 0,
-            Err(_) => false
+            Ok(metadata) => {
+                if metadata.len() > 0 {
+                    true
+                } else {
+                    error!("FATAL: GPU kernel file has zero size");
+                    panic!("GPU initialization failed: Kernel file has zero size");
+                }
+            },
+            Err(e) => {
+                error!("FATAL: Failed to access GPU kernel file: {}", e);
+                panic!("GPU initialization failed: Cannot access kernel file: {}", e);
+            }
         }
     }
 
@@ -327,7 +338,8 @@ impl GpuMiner {
             if self.is_using_gpu {
                 info!("Launching GPU mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
             } else {
-                info!("Launching CPU fallback mining kernel with {} nonces starting from {}", nonce_range, nonce_start);
+                error!("FATAL: GPU mining is not available, cannot proceed with CPU fallback");
+                panic!("GPU mining is not available. Please check GPU initialization logs for details.");
             }
             
             if let Err(e) = kernel.launch(
@@ -373,11 +385,7 @@ impl GpuMiner {
                     return Err("Failed to copy nonce from device".to_string());
                 }
                 
-                if self.is_using_gpu {
-                    info!("GPU found valid nonce!");
-                } else {
-                    info!("CPU fallback found valid nonce!");
-                }
+                info!("🎉 GPU found valid nonce!")
                 
                 Some(nonce)
             } else {
@@ -477,11 +485,68 @@ impl GpuMiner {
             let pci_id = std::ffi::CStr::from_ptr(pci_bus_id.as_ptr() as *const i8)
                 .to_string_lossy()
                 .into_owned();
+                
+            // Get architecture
+            let mut arch_major = 0;
+            let mut arch_minor = 0;
+            if hipDeviceGetAttribute(&mut arch_major, hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMajor, device_id) != hipSuccess ||
+               hipDeviceGetAttribute(&mut arch_minor, hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMinor, device_id) != hipSuccess {
+                return Err(format!("Failed to get architecture for device {}", device_id));
+            }
             
-            info!("GPU Device #{}: {} (PCI: {})", device_id, device_name, pci_id);
+            // Get warp size
+            let mut warp_size = 0;
+            if hipDeviceGetAttribute(&mut warp_size, hipDeviceAttribute_t_hipDeviceAttributeWarpSize, device_id) != hipSuccess {
+                return Err(format!("Failed to get warp size for device {}", device_id));
+            }
+            
+            // Get max threads per block
+            let mut max_threads_per_block = 0;
+            if hipDeviceGetAttribute(&mut max_threads_per_block, hipDeviceAttribute_t_hipDeviceAttributeMaxThreadsPerBlock, device_id) != hipSuccess {
+                return Err(format!("Failed to get max threads per block for device {}", device_id));
+            }
+            
+            // Get max shared memory per block
+            let mut max_shared_mem = 0;
+            if hipDeviceGetAttribute(&mut max_shared_mem, hipDeviceAttribute_t_hipDeviceAttributeMaxSharedMemoryPerBlock, device_id) != hipSuccess {
+                return Err(format!("Failed to get max shared memory for device {}", device_id));
+            }
+            
+            // Get ROCm device ID (for AMD GPUs)
+            let mut rocm_device_id = 0;
+            let rocm_id_result = hipDeviceGetAttribute(&mut rocm_device_id, hipDeviceAttribute_t_hipDeviceAttributeDeviceId, device_id);
+            
+            // Check if this is an AMD MI100 GPU
+            let is_mi100 = device_name.contains("MI100");
+            
+            info!("🔍 GPU Device #{}: {} (PCI: {})", device_id, device_name, pci_id);
             info!("  - Compute Units: {}", compute_units);
             info!("  - Total Memory: {} MB", total_mem / (1024 * 1024));
             info!("  - Clock Rate: {} MHz", clock_rate / 1000);
+            info!("  - Architecture: {}.{}", arch_major, arch_minor);
+            info!("  - Warp Size: {}", warp_size);
+            info!("  - Max Threads Per Block: {}", max_threads_per_block);
+            info!("  - Max Shared Memory Per Block: {} KB", max_shared_mem / 1024);
+            
+            if rocm_id_result == hipSuccess {
+                info!("  - ROCm Device ID: {}", rocm_device_id);
+            }
+            
+            if is_mi100 {
+                info!("  - 🚀 Detected AMD MI100 GPU!");
+            }
+            
+            // Try to get HIP runtime version
+            let mut hip_runtime_version = 0;
+            if hipRuntimeGetVersion(&mut hip_runtime_version) == hipSuccess {
+                info!("  - HIP Runtime Version: {}", hip_runtime_version);
+            }
+            
+            // Try to get device runtime version
+            let mut hip_driver_version = 0;
+            if hipDriverGetVersion(&mut hip_driver_version) == hipSuccess {
+                info!("  - HIP Driver Version: {}", hip_driver_version);
+            }
             
             Ok(())
         }

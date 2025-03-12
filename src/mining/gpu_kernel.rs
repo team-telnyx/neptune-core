@@ -91,17 +91,20 @@ impl MiningKernel {
             let mut device_count = 0;
             let status = hipGetDeviceCount(&mut device_count);
             if status != hipSuccess {
-                error!("Failed to get HIP device count: error code {}", status);
-                return;
+                error!("FATAL: Failed to get HIP device count: error code {}", status);
+                panic!("GPU initialization failed: Cannot get HIP device count: error code {}", status);
             }
             
             if device_count == 0 {
-                error!("No HIP devices available for GPU mining");
-                return;
+                error!("FATAL: No HIP devices available for GPU mining");
+                panic!("GPU initialization failed: No HIP devices available");
             }
             
             // Log available devices
             info!("Found {} HIP device(s) for GPU mining", device_count);
+            
+            // Check for AMD MI100 GPUs specifically
+            let mut has_mi100 = false;
             for device_id in 0..device_count {
                 let mut name_buffer = [0u8; 256];
                 if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) == hipSuccess {
@@ -111,36 +114,67 @@ impl MiningKernel {
                     let mut compute_units = 0;
                     if hipDeviceGetAttribute(&mut compute_units, hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount, device_id) == hipSuccess {
                         info!("  Device #{}: {} with {} compute units", device_id, device_name, compute_units);
+                        
+                        // Check if this is an MI100 GPU
+                        if device_name.contains("MI100") {
+                            info!("  🚀 Detected AMD MI100 GPU at device #{}", device_id);
+                            has_mi100 = true;
+                            
+                            // Set this device as active for kernel compilation
+                            let set_device_status = hipSetDevice(device_id);
+                            if set_device_status != hipSuccess {
+                                warn!("Failed to set MI100 GPU as active device: error code {}", set_device_status);
+                            } else {
+                                info!("Set MI100 GPU (device #{}) as active for kernel compilation", device_id);
+                            }
+                        }
                     } else {
                         info!("  Device #{}: {}", device_id, device_name);
                     }
+                    
+                    // Get ROCm device ID (for AMD GPUs)
+                    let mut rocm_device_id = 0;
+                    if hipDeviceGetAttribute(&mut rocm_device_id, hipDeviceAttribute_t_hipDeviceAttributeDeviceId, device_id) == hipSuccess {
+                        info!("  - ROCm Device ID: {}", rocm_device_id);
+                    }
                 }
+            }
+            
+            // Log HIP runtime and driver versions
+            let mut hip_runtime_version = 0;
+            if hipRuntimeGetVersion(&mut hip_runtime_version) == hipSuccess {
+                info!("HIP Runtime Version: {}", hip_runtime_version);
+            }
+            
+            let mut hip_driver_version = 0;
+            if hipDriverGetVersion(&mut hip_driver_version) == hipSuccess {
+                info!("HIP Driver Version: {}", hip_driver_version);
             }
             
             // Create a module that contains our kernel
             info!("Attempting to create GPU module...");
             let module_ptr = self.create_gpu_module().unwrap_or_else(|e| {
-                error!("Failed to create GPU module: {}", e);
-                std::ptr::null_mut()
+                error!("FATAL: Failed to create GPU module: {}", e);
+                panic!("GPU initialization failed: Cannot create GPU module: {}", e);
             });
             
             if module_ptr.is_null() {
-                error!("Failed to create GPU module, will use CPU fallback");
-                return;
+                error!("FATAL: Failed to create GPU module, module pointer is null");
+                panic!("GPU initialization failed: Module pointer is null");
             }
             
             // Get the kernel function from the module
             info!("Attempting to get kernel function...");
             let function_ptr = self.get_kernel_function(module_ptr).unwrap_or_else(|e| {
-                error!("Failed to get kernel function: {}", e);
+                error!("FATAL: Failed to get kernel function: {}", e);
                 hipModuleUnload(module_ptr);
-                std::ptr::null_mut()
+                panic!("GPU initialization failed: Cannot get kernel function: {}", e);
             });
             
             if function_ptr.is_null() {
-                error!("Failed to get kernel function, will use CPU fallback");
+                error!("FATAL: Failed to get kernel function, function pointer is null");
                 hipModuleUnload(module_ptr);
-                return;
+                panic!("GPU initialization failed: Function pointer is null");
             }
             
             // Store the module and function pointers
@@ -148,13 +182,13 @@ impl MiningKernel {
             GPU_KERNEL_FUNCTION = function_ptr;
             initialized = true;
             
-            info!("Successfully initialized GPU kernel for mining");
+            info!("✅ Successfully initialized GPU kernel for mining");
         });
         
         if !initialized && GPU_KERNEL_FUNCTION.is_null() {
-            // If initialization failed, fall back to CPU implementation
-            warn!("GPU kernel initialization failed, using CPU fallback for mining kernel");
-            return Ok(mining_kernel as *const c_void);
+            // If initialization failed, we should not fall back to CPU implementation
+            error!("FATAL: GPU kernel initialization failed");
+            panic!("GPU initialization failed: Cannot initialize GPU kernel");
         }
         
         Ok(GPU_KERNEL_FUNCTION as *const c_void)
@@ -167,19 +201,44 @@ impl MiningKernel {
         // First, check if a pre-compiled kernel exists
         if std::path::Path::new("mining_kernel.hsaco").exists() {
             info!("Found pre-compiled kernel file, attempting to load it");
-            let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
             
-            if status == hipSuccess {
-                info!("Successfully loaded pre-compiled GPU kernel module");
-                return Ok(module);
+            // Check the file size to ensure it's not empty
+            match std::fs::metadata("mining_kernel.hsaco") {
+                Ok(metadata) => {
+                    let size = metadata.len();
+                    if size == 0 {
+                        error!("Pre-compiled kernel file exists but has zero size");
+                        std::fs::remove_file("mining_kernel.hsaco").ok();
+                        info!("Removed invalid kernel file, will recompile");
+                    } else {
+                        info!("Pre-compiled kernel file size: {} bytes", size);
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to get kernel file metadata: {}, will try to recompile", e);
+                }
             }
             
-            warn!("Failed to load pre-compiled GPU module: error code {}. Will try to compile it.", status);
+            // Try to load the pre-compiled kernel
+            if std::path::Path::new("mining_kernel.hsaco").exists() && 
+               std::fs::metadata("mining_kernel.hsaco").map(|m| m.len() > 0).unwrap_or(false) {
+                let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
+                
+                if status == hipSuccess {
+                    info!("✅ Successfully loaded pre-compiled GPU kernel module");
+                    return Ok(module);
+                }
+                
+                warn!("Failed to load pre-compiled GPU module: error code {}. Will recompile it.", status);
+                // Remove the invalid kernel file
+                std::fs::remove_file("mining_kernel.hsaco").ok();
+            }
         }
         
         // If no pre-compiled kernel exists or loading failed, compile it
-        info!("Generating GPU kernel source code");
+        info!("Generating GPU kernel source code for AMD MI100 GPU");
         let kernel_source = create_gpu_kernel_source();
+        info!("Generated kernel source code: {} bytes", kernel_source.len());
         
         // Write the kernel source to a file
         let source_file = "mining_kernel.cpp";
@@ -191,13 +250,35 @@ impl MiningKernel {
             }
         }
         
-        // Try to compile the kernel using hipcc
+        // Check if hipcc is available and get its version
+        info!("Checking hipcc compiler...");
+        let hipcc_version = std::process::Command::new("hipcc")
+            .arg("--version")
+            .output();
+            
+        match hipcc_version {
+            Ok(output) => {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout);
+                    info!("hipcc version: {}", version.lines().next().unwrap_or("unknown"));
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    warn!("Failed to get hipcc version: {}", stderr);
+                }
+            },
+            Err(e) => {
+                warn!("Failed to execute hipcc version check: {}", e);
+            }
+        }
+        
+        // Try to compile the kernel using hipcc with verbose output
         info!("Compiling GPU kernel with hipcc...");
         let output = std::process::Command::new("hipcc")
             .args(&[
                 "--genco",
                 "-O3",
                 "-fgpu-rdc",
+                "-v", // Verbose output
                 "-o", "mining_kernel.hsaco",
                 source_file
             ])
@@ -205,13 +286,43 @@ impl MiningKernel {
         
         match output {
             Ok(output) => {
+                // Log both stdout and stderr regardless of success
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                
+                if !stdout.is_empty() {
+                    info!("Compiler stdout: {}", stdout);
+                }
+                
+                if !stderr.is_empty() {
+                    if output.status.success() {
+                        info!("Compiler stderr (not an error): {}", stderr);
+                    } else {
+                        error!("Compiler stderr: {}", stderr);
+                    }
+                }
+                
                 if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    error!("Failed to compile GPU kernel: {}", stderr);
                     return Err(format!("Failed to compile GPU kernel: {}", stderr));
                 }
                 
-                info!("Successfully compiled GPU kernel");
+                info!("✅ Successfully compiled GPU kernel");
+                
+                // Verify the compiled file exists and has non-zero size
+                match std::fs::metadata("mining_kernel.hsaco") {
+                    Ok(metadata) => {
+                        let size = metadata.len();
+                        if size == 0 {
+                            error!("Compiled kernel file has zero size");
+                            return Err("Compiled kernel file has zero size".to_string());
+                        }
+                        info!("Compiled kernel file size: {} bytes", size);
+                    },
+                    Err(e) => {
+                        error!("Failed to get compiled kernel file metadata: {}", e);
+                        return Err(format!("Failed to get compiled kernel file metadata: {}", e));
+                    }
+                }
                 
                 // Now try to load the compiled module
                 let status = hipModuleLoad(&mut module, b"mining_kernel.hsaco\0".as_ptr() as *const i8);
@@ -221,7 +332,7 @@ impl MiningKernel {
                     return Err(format!("Failed to load compiled GPU module: error code {}", status));
                 }
                 
-                info!("Successfully loaded compiled GPU kernel module");
+                info!("✅ Successfully loaded compiled GPU kernel module");
                 Ok(module)
             },
             Err(e) => {
@@ -236,6 +347,12 @@ impl MiningKernel {
         // Get the kernel function from the module
         let mut function = std::ptr::null_mut();
         
+        info!("Attempting to get 'mining_kernel' function from module");
+        
+        // First, try to list all functions in the module (if available)
+        // This is not directly supported by HIP API, but we can log the attempt
+        info!("Looking for kernel function 'mining_kernel' in the module");
+        
         let status = hipModuleGetFunction(
             &mut function,
             module,
@@ -243,10 +360,33 @@ impl MiningKernel {
         );
         
         if status != hipSuccess {
-            warn!("Failed to get kernel function: error code {}. Using CPU fallback.", status);
-            return Err("Failed to get kernel function".to_string());
+            error!("FATAL: Failed to get kernel function 'mining_kernel': error code {}", status);
+            
+            // Try to get more information about the error
+            let error_string = match status {
+                1 => "hipErrorInvalidValue - Invalid module or function name",
+                2 => "hipErrorNotInitialized - HIP runtime not initialized",
+                3 => "hipErrorNotFound - Function not found in module",
+                _ => "Unknown error",
+            };
+            
+            error!("Error details: {}", error_string);
+            
+            // Check if the module is valid
+            if module.is_null() {
+                error!("FATAL: Module pointer is null");
+                return Err("Module pointer is null".to_string());
+            }
+            
+            return Err(format!("Failed to get kernel function: {} (error code {})", error_string, status));
         }
         
+        if function.is_null() {
+            error!("FATAL: Function pointer is null even though hipModuleGetFunction succeeded");
+            return Err("Function pointer is null".to_string());
+        }
+        
+        info!("✅ Successfully retrieved 'mining_kernel' function from module");
         Ok(function)
     }
 }
