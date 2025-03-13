@@ -29,6 +29,7 @@ use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::JobQueue;
+use crate::mining::GpuMiner;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -55,7 +56,6 @@ use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
-use crate::mining::GpuMiner;
 
 /// Information related to the resources to be used for guessing.
 #[derive(Debug, Clone, Copy)]
@@ -214,7 +214,7 @@ fn guess_worker(
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
-    
+
     // note: this article discusses rayon strategies for mining.
     // https://www.innoq.com/en/blog/2018/06/blockchain-mining-embarrassingly-parallel/
     //
@@ -233,116 +233,134 @@ fn guess_worker(
     block.set_header_guesser_digest(guesser_key.after_image());
 
     let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
-    
+
     // Try to use GPU if enabled
     let mut gpu_miner = None;
     if use_gpu {
         info!("GPU mining enabled, attempting to initialize GPU miner");
-        
+
         // Check if GPUs are available
         match GpuMiner::get_device_count() {
             Ok(count) => {
                 if count <= 0 {
-                    warn!("No GPU devices found. Falling back to CPU mining.");
+                    error!("FATAL: No GPU devices found. GPU mining was requested but no GPUs are available.");
+                    panic!("GPU mining was requested but no GPUs are available.");
                 } else {
-                let device_id = gpu_device_id.unwrap_or(0);
-                if device_id < count {
-                    match GpuMiner::new(device_id) {
-                        Ok(miner) => {
-                            let (dev_id, name, compute_units, is_using_gpu) = miner.get_device_info();
-                            if is_using_gpu {
-                                info!(
-                                    "Using GPU device {}: {} with {} compute units for mining block {} with {} outputs and difficulty {}. Target: {}",
-                                    dev_id,
-                                    name,
-                                    compute_units,
-                                    block.header().height,
-                                    block.body().transaction_kernel.outputs.len(),
-                                    previous_block_header.difficulty,
-                                    threshold.to_hex()
-                                );
-                            } else {
-                                info!(
-                                    "Using GPU device {}: {} with {} compute units (CPU fallback mode) for mining block {} with {} outputs and difficulty {}. Target: {}",
-                                    dev_id,
-                                    name,
-                                    compute_units,
-                                    block.header().height,
-                                    block.body().transaction_kernel.outputs.len(),
-                                    previous_block_header.difficulty,
-                                    threshold.to_hex()
-                                );
+                    let device_id = gpu_device_id.unwrap_or(0);
+                    if device_id < count {
+                        match GpuMiner::new(device_id) {
+                            Ok(miner) => {
+                                let (dev_id, name, compute_units, is_using_gpu) =
+                                    miner.get_device_info();
+                                if is_using_gpu {
+                                    info!(
+                                        "Using GPU device {}: {} with {} compute units for mining block {} with {} outputs and difficulty {}. Target: {}",
+                                        dev_id,
+                                        name,
+                                        compute_units,
+                                        block.header().height,
+                                        block.body().transaction_kernel.outputs.len(),
+                                        previous_block_header.difficulty,
+                                        threshold.to_hex()
+                                    );
+                                    gpu_miner = Some(miner);
+                                } else {
+                                    error!("FATAL: GPU device {} reports it's not using GPU acceleration.", dev_id);
+                                    panic!(
+                                        "GPU device {} reports it's not using GPU acceleration.",
+                                        dev_id
+                                    );
+                                }
                             }
-                            gpu_miner = Some(miner);
+                            Err(e) => {
+                                error!("FATAL: Failed to initialize GPU miner: {}.", e);
+                                panic!("Failed to initialize GPU miner: {}.", e);
+                            }
                         }
-                        Err(e) => {
-                            warn!("Failed to initialize GPU miner: {}. Falling back to CPU mining.", e);
-                        }
+                    } else {
+                        error!(
+                            "FATAL: Invalid GPU device ID: {}. Available devices: {}.",
+                            device_id, count
+                        );
+                        panic!(
+                            "Invalid GPU device ID: {}. Available devices: {}.",
+                            device_id, count
+                        );
                     }
-                } else {
-                    warn!("Invalid GPU device ID: {}. Available devices: {}. Falling back to CPU mining.", device_id, count);
-                }
                 }
             }
             Err(e) => {
-                warn!("Failed to get GPU device count: {}. Falling back to CPU mining.", e);
+                error!("FATAL: Failed to get GPU device count: {}.", e);
+                panic!("Failed to get GPU device count: {}.", e);
             }
         }
     }
-    
+
     let nonce = if let Some(miner) = gpu_miner {
         // Use GPU mining
         info!("Starting GPU mining...");
-        
+
         // Convert kernel_auth_path and header_auth_path to the correct types
         let kernel_path: [Digest; 2] = kernel_auth_path;
         let header_path: [Digest; 3] = header_auth_path;
-        
+
         // Loop until we find a valid nonce or are cancelled
         let mut found_nonce = None;
+        let mut consecutive_errors = 0;
+        let max_consecutive_errors = 3; // Allow up to 3 consecutive errors before giving up
+
         while found_nonce.is_none() {
             // Check if task has been cancelled
             if sender.is_canceled() {
                 info!("GPU mining task cancelled");
                 return;
             }
-            
+
             // Run the GPU mining kernel
-            match miner.mine_block(kernel_path, header_path, threshold, prev_difficulty.as_u64()) {
+            match miner.mine_block(
+                kernel_path,
+                header_path,
+                threshold,
+                prev_difficulty.as_u64(),
+            ) {
                 Ok(Some(nonce)) => {
                     info!("GPU found valid nonce!");
                     found_nonce = Some(nonce);
+                    consecutive_errors = 0;
                 }
                 Ok(None) => {
                     // No nonce found in this batch, continue with next batch
+                    consecutive_errors = 0;
                     if sleepy_guessing {
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                 }
                 Err(e) => {
-                    warn!("GPU mining error: {}. Falling back to CPU mining.", e);
-                    break;
+                    consecutive_errors += 1;
+                    error!(
+                        "GPU mining error: {} (attempt {} of {})",
+                        e, consecutive_errors, max_consecutive_errors
+                    );
+
+                    if consecutive_errors >= max_consecutive_errors {
+                        error!(
+                            "FATAL: GPU mining failed after {} consecutive errors. Last error: {}",
+                            consecutive_errors, e
+                        );
+                        panic!(
+                            "GPU mining failed after {} consecutive errors: {}",
+                            consecutive_errors, e
+                        );
+                    }
+
+                    // Brief pause before retrying
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                 }
             }
         }
-        
-        // If we found a nonce with GPU, return it, otherwise fall back to CPU
-        if let Some(nonce) = found_nonce {
-            nonce
-        } else {
-            // Fall back to CPU mining
-            use_cpu_mining(
-                kernel_auth_path,
-                header_auth_path,
-                threshold,
-                sleepy_guessing,
-                num_guesser_threads,
-                &sender,
-                block.header().height,
-                block.body().transaction_kernel.outputs.len(),
-                previous_block_header.difficulty.as_u64(),
-            )
-        }
+
+        // Return the found nonce (we never fall back to CPU)
+        found_nonce.unwrap()
     } else {
         // Use CPU mining
         use_cpu_mining(
@@ -856,7 +874,7 @@ pub(crate) async fn mine(
                 GuessingConfiguration {
                     sleepy_guessing: cli_args.sleepy_guessing,
                     num_guesser_threads: cli_args.guesser_threads,
-                    use_gpu: true, // Enable GPU mining by default
+                    use_gpu: true,       // Enable GPU mining by default
                     gpu_device_id: None, // Use default device (0)
                 },
                 None, // use default TARGET_BLOCK_INTERVAL

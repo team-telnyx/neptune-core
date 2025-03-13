@@ -1,5 +1,12 @@
-// Use mock implementation for testing
-mod mock_impl;
+// GPU mining implementation
+mod gpu_kernel;
+mod gpu_miner;
+mod hip_mock;
 
-pub use mock_impl::GpuMiner;
-pub use mock_impl::create_gpu_kernel_source;
+// Export the GPU miner implementation
+pub use gpu_kernel::create_gpu_kernel_source;
+pub use gpu_miner::GpuMiner;
+
+// Re-export hip_mock for use in other modules
+#[cfg(feature = "hip_mock")]
+pub use hip_mock::*;

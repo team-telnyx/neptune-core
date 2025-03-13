@@ -1,14 +1,14 @@
-use std::sync::Arc;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 // Use our mock implementation instead of the real HIP runtime
 use super::hip_mock::*;
 use crate::prelude::twenty_first::math::digest::Digest;
-use tracing::*;
 use rand::Rng;
+use tracing::*;
 
-use super::gpu_kernel::{MiningKernel, create_gpu_kernel_source};
+use super::gpu_kernel::{create_gpu_kernel_source, MiningKernel};
 
 // Flag to track if we've attempted to compile the GPU kernel
 static mut GPU_KERNEL_COMPILED: bool = false;
@@ -66,45 +66,70 @@ impl GpuMiner {
             let status = hipGetDeviceCount(&mut device_count);
             if status != hipSuccess {
                 error!("Failed to get GPU device count: error code {}", status);
-                return Err(format!("Failed to get GPU device count: error code {}", status));
+                return Err(format!(
+                    "Failed to get GPU device count: error code {}",
+                    status
+                ));
             }
-            
-            info!("Initializing GPU miner. Found {} GPU device(s)", device_count);
-            
+
+            info!(
+                "Initializing GPU miner. Found {} GPU device(s)",
+                device_count
+            );
+
             if device_count == 0 {
                 return Err("No GPU devices found".to_string());
             }
-            
+
             // Log information about all available devices
             for dev_id in 0..device_count {
                 Self::log_device_info(dev_id)?;
             }
-            
+
             // Validate the requested device ID
             if device_id >= device_count {
-                return Err(format!("Invalid device ID {}. Available devices: {}", device_id, device_count));
+                return Err(format!(
+                    "Invalid device ID {}. Available devices: {}",
+                    device_id, device_count
+                ));
             }
 
             // Set the active device
             info!("Setting active GPU device to {}", device_id);
             let status = hipSetDevice(device_id);
             if status != hipSuccess {
-                error!("Failed to set GPU device {}: error code {}", device_id, status);
-                return Err(format!("Failed to set GPU device {}: error code {}", device_id, status));
+                error!(
+                    "Failed to set GPU device {}: error code {}",
+                    device_id, status
+                );
+                return Err(format!(
+                    "Failed to set GPU device {}: error code {}",
+                    device_id, status
+                ));
             }
 
             // Get device name and compute units
             let mut name_buffer = [0u8; 256];
-            if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) != hipSuccess {
+            if hipDeviceGetName(
+                name_buffer.as_mut_ptr() as *mut i8,
+                name_buffer.len() as i32,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err("Failed to get device name".to_string());
             }
-            
+
             let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
                 .to_string_lossy()
                 .into_owned();
-                
+
             let mut compute_units = 0;
-            if hipDeviceGetAttribute(&mut compute_units, hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount, device_id) != hipSuccess {
+            if hipDeviceGetAttribute(
+                &mut compute_units,
+                hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err("Failed to get compute unit count".to_string());
             }
 
@@ -135,21 +160,24 @@ impl GpuMiner {
             })
         }
     }
-    
+
     // Ensure the GPU kernel is compiled and available
     // This function will now panic instead of falling back to CPU if GPU initialization fails
     unsafe fn ensure_gpu_kernel_compiled() -> bool {
         if !GPU_KERNEL_COMPILED {
             GPU_KERNEL_COMPILED = true;
-            
+
             // Check if the kernel file already exists
             if !Path::new("mining_kernel.hsaco").exists() {
                 info!("No pre-compiled GPU kernel found, will generate and compile one");
-                
+
                 // Generate the kernel source code
                 let kernel_source = create_gpu_kernel_source();
-                info!("Generated GPU kernel source code ({} bytes)", kernel_source.len());
-                
+                info!(
+                    "Generated GPU kernel source code ({} bytes)",
+                    kernel_source.len()
+                );
+
                 // Write the kernel source to a file
                 match File::create("mining_kernel.cpp") {
                     Ok(mut file) => {
@@ -163,15 +191,16 @@ impl GpuMiner {
                     }
                     Err(e) => {
                         error!("FATAL: Failed to create kernel source file: {}", e);
-                        panic!("GPU initialization failed: Cannot create kernel source file: {}", e);
+                        panic!(
+                            "GPU initialization failed: Cannot create kernel source file: {}",
+                            e
+                        );
                     }
                 }
-                
+
                 // Check if hipcc is available
-                let hipcc_check = std::process::Command::new("which")
-                    .arg("hipcc")
-                    .output();
-                
+                let hipcc_check = std::process::Command::new("which").arg("hipcc").output();
+
                 match hipcc_check {
                     Ok(output) => {
                         if !output.status.success() {
@@ -183,10 +212,13 @@ impl GpuMiner {
                     }
                     Err(e) => {
                         error!("FATAL: Failed to check for hipcc compiler: {}", e);
-                        panic!("GPU initialization failed: Cannot check for hipcc compiler: {}", e);
+                        panic!(
+                            "GPU initialization failed: Cannot check for hipcc compiler: {}",
+                            e
+                        );
                     }
                 }
-                
+
                 // Get ROCm version for compiler flags
                 let rocm_version = std::process::Command::new("sh")
                     .arg("-c")
@@ -194,19 +226,25 @@ impl GpuMiner {
                     .output()
                     .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
                     .unwrap_or_else(|_| "unknown".to_string());
-                
+
                 info!("Detected ROCm version: {}", rocm_version);
-                
+
                 // Check for AMD MI100 GPUs and add specific optimization flags
                 let mut has_mi100 = false;
                 let mut device_count = 0;
                 if hipGetDeviceCount(&mut device_count) == hipSuccess {
                     for device_id in 0..device_count {
                         let mut name_buffer = [0u8; 256];
-                        if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) == hipSuccess {
-                            let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
-                                .to_string_lossy();
-                            
+                        if hipDeviceGetName(
+                            name_buffer.as_mut_ptr() as *mut i8,
+                            name_buffer.len() as i32,
+                            device_id,
+                        ) == hipSuccess
+                        {
+                            let device_name =
+                                std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+                                    .to_string_lossy();
+
                             if device_name.contains("MI100") {
                                 has_mi100 = true;
                                 info!("🚀 Detected AMD MI100 GPU, will use specific optimizations");
@@ -215,14 +253,14 @@ impl GpuMiner {
                         }
                     }
                 }
-                
+
                 // Prepare compiler flags based on detected hardware
                 let mut compiler_args = vec![
                     "--genco".to_string(),
                     "-O3".to_string(),
                     "-fgpu-rdc".to_string(),
                 ];
-                
+
                 // Add MI100-specific optimizations if detected
                 if has_mi100 {
                     compiler_args.push("-march=gfx908".to_string());
@@ -230,24 +268,30 @@ impl GpuMiner {
                     compiler_args.push("--offload-arch=gfx908".to_string());
                     compiler_args.push("-mwavefrontsize64".to_string());
                 }
-                
+
                 // Add output file and source file
                 compiler_args.push("-o".to_string());
                 compiler_args.push("mining_kernel.hsaco".to_string());
                 compiler_args.push("mining_kernel.cpp".to_string());
-                
+
                 // Try to compile the kernel using hipcc with appropriate flags
-                info!("Compiling GPU kernel with hipcc using flags: {:?}", compiler_args);
+                info!(
+                    "Compiling GPU kernel with hipcc using flags: {:?}",
+                    compiler_args
+                );
                 let compile_output = std::process::Command::new("hipcc")
                     .args(&compiler_args)
                     .output();
-                
+
                 match compile_output {
                     Ok(output) => {
                         if !output.status.success() {
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             error!("FATAL: Failed to compile GPU kernel: {}", stderr);
-                            panic!("GPU initialization failed: Cannot compile GPU kernel: {}", stderr);
+                            panic!(
+                                "GPU initialization failed: Cannot compile GPU kernel: {}",
+                                stderr
+                            );
                         }
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         if !stdout.is_empty() {
@@ -263,7 +307,7 @@ impl GpuMiner {
             } else {
                 info!("Using existing GPU kernel binary: mining_kernel.hsaco");
             }
-            
+
             // Check if the compiled kernel exists and has non-zero size
             match std::fs::metadata("mining_kernel.hsaco") {
                 Ok(metadata) => {
@@ -278,11 +322,14 @@ impl GpuMiner {
                 }
                 Err(e) => {
                     error!("FATAL: Failed to get GPU kernel file metadata: {}", e);
-                    panic!("GPU initialization failed: Cannot access kernel file: {}", e);
+                    panic!(
+                        "GPU initialization failed: Cannot access kernel file: {}",
+                        e
+                    );
                 }
             }
         }
-        
+
         // Check if the kernel file exists and has non-zero size
         match std::fs::metadata("mining_kernel.hsaco") {
             Ok(metadata) => {
@@ -292,16 +339,24 @@ impl GpuMiner {
                     error!("FATAL: GPU kernel file has zero size");
                     panic!("GPU initialization failed: Kernel file has zero size");
                 }
-            },
+            }
             Err(e) => {
                 error!("FATAL: Failed to access GPU kernel file: {}", e);
-                panic!("GPU initialization failed: Cannot access kernel file: {}", e);
+                panic!(
+                    "GPU initialization failed: Cannot access kernel file: {}",
+                    e
+                );
             }
         }
     }
 
     pub fn get_device_info(&self) -> (i32, &str, i32, bool) {
-        (self.device, &self.device_name, self.compute_units, self.is_using_gpu)
+        (
+            self.device,
+            &self.device_name,
+            self.compute_units,
+            self.is_using_gpu,
+        )
     }
 
     pub fn mine_block(
@@ -318,45 +373,59 @@ impl GpuMiner {
             let mut d_threshold = std::ptr::null_mut();
             let mut d_result = std::ptr::null_mut();
             let mut d_found_nonce = std::ptr::null_mut();
-            
+
             let kernel_size = std::mem::size_of::<Digest>() * 2;
             let header_size = std::mem::size_of::<Digest>() * 3;
             let digest_size = std::mem::size_of::<Digest>();
             let result_size = std::mem::size_of::<u64>();
-            
+
             // Allocate memory on device
-            if hipMalloc(&mut d_kernel_auth_path, kernel_size) != hipSuccess ||
-               hipMalloc(&mut d_header_auth_path, header_size) != hipSuccess ||
-               hipMalloc(&mut d_threshold, digest_size) != hipSuccess ||
-               hipMalloc(&mut d_result, result_size) != hipSuccess ||
-               hipMalloc(&mut d_found_nonce, digest_size) != hipSuccess {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+            if hipMalloc(&mut d_kernel_auth_path, kernel_size) != hipSuccess
+                || hipMalloc(&mut d_header_auth_path, header_size) != hipSuccess
+                || hipMalloc(&mut d_threshold, digest_size) != hipSuccess
+                || hipMalloc(&mut d_result, result_size) != hipSuccess
+                || hipMalloc(&mut d_found_nonce, digest_size) != hipSuccess
+            {
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err("Failed to allocate device memory".to_string());
             }
-            
+
             // Copy data to device
             if hipMemcpy(
                 d_kernel_auth_path,
                 kernel_auth_path.as_ptr() as *const _,
                 kernel_size,
                 hipMemcpyHostToDevice,
-            ) != hipSuccess ||
-            hipMemcpy(
-                d_header_auth_path,
-                header_auth_path.as_ptr() as *const _,
-                header_size,
-                hipMemcpyHostToDevice,
-            ) != hipSuccess ||
-            hipMemcpy(
-                d_threshold,
-                &threshold as *const _ as *const _,
-                digest_size,
-                hipMemcpyHostToDevice,
-            ) != hipSuccess {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+            ) != hipSuccess
+                || hipMemcpy(
+                    d_header_auth_path,
+                    header_auth_path.as_ptr() as *const _,
+                    header_size,
+                    hipMemcpyHostToDevice,
+                ) != hipSuccess
+                || hipMemcpy(
+                    d_threshold,
+                    &threshold as *const _ as *const _,
+                    digest_size,
+                    hipMemcpyHostToDevice,
+                ) != hipSuccess
+            {
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err("Failed to copy data to device".to_string());
             }
-            
+
             // Initialize result to 0 (not found)
             let result_init: u64 = 0;
             if hipMemcpy(
@@ -364,31 +433,43 @@ impl GpuMiner {
                 &result_init as *const _ as *const _,
                 result_size,
                 hipMemcpyHostToDevice,
-            ) != hipSuccess {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+            ) != hipSuccess
+            {
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err("Failed to initialize result memory".to_string());
             }
-            
+
             // Generate random nonce start
             let nonce_start = rand::thread_rng().gen::<u64>();
-            
+
             // Adjust nonce range based on device capabilities
             // MI100 GPUs can handle larger batches
             let nonce_range = if self.device_name.contains("MI100") {
                 // MI100 has 120 compute units, can handle larger batches
-                2_000_000_000 // 2 billion nonces per kernel launch for MI100
+                5_000_000_000 // 5 billion nonces per kernel launch for MI100
             } else {
                 1_000_000_000 // 1 billion nonces for other GPUs
             };
-            
+
             // Create and launch kernel
             let kernel = MiningKernel::new(difficulty, nonce_start, nonce_range);
-            
+
             if self.is_using_gpu {
-                info!("Launching GPU mining kernel on {} with {} compute units", 
-                      self.device_name, self.compute_units);
-                info!("Processing {} nonces starting from {}", nonce_range, nonce_start);
-                
+                info!(
+                    "Launching GPU mining kernel on {} with {} compute units",
+                    self.device_name, self.compute_units
+                );
+                info!(
+                    "Processing {} nonces starting from {}",
+                    nonce_range, nonce_start
+                );
+
                 // Log additional information for MI100 GPUs
                 if self.device_name.contains("MI100") {
                     info!("Using optimized kernel for AMD MI100 GPU architecture");
@@ -397,7 +478,7 @@ impl GpuMiner {
                 error!("FATAL: GPU mining is not available, cannot proceed with CPU fallback");
                 panic!("GPU mining is not available. Please check GPU initialization logs for details.");
             }
-            
+
             if let Err(e) = kernel.launch(
                 self.stream.stream,
                 d_kernel_auth_path as *const _,
@@ -406,16 +487,28 @@ impl GpuMiner {
                 d_result as *mut _,
                 d_found_nonce as *mut _,
             ) {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err(e);
             }
-            
+
             // Wait for kernel to complete
             if hipStreamSynchronize(self.stream.stream) != hipSuccess {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err("Failed to synchronize HIP stream".to_string());
             }
-            
+
             // Check if a nonce was found
             let mut result: u64 = 0;
             if hipMemcpy(
@@ -423,11 +516,18 @@ impl GpuMiner {
                 d_result,
                 result_size,
                 hipMemcpyDeviceToHost,
-            ) != hipSuccess {
-                self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+            ) != hipSuccess
+            {
+                self.free_device_memory(
+                    d_kernel_auth_path,
+                    d_header_auth_path,
+                    d_threshold,
+                    d_result,
+                    d_found_nonce,
+                );
                 return Err("Failed to copy result from device".to_string());
             }
-            
+
             let found_nonce = if result == 1 {
                 // A valid nonce was found, copy it back
                 let mut nonce = Digest::default();
@@ -436,25 +536,38 @@ impl GpuMiner {
                     d_found_nonce,
                     digest_size,
                     hipMemcpyDeviceToHost,
-                ) != hipSuccess {
-                    self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
+                ) != hipSuccess
+                {
+                    self.free_device_memory(
+                        d_kernel_auth_path,
+                        d_header_auth_path,
+                        d_threshold,
+                        d_result,
+                        d_found_nonce,
+                    );
                     return Err("Failed to copy nonce from device".to_string());
                 }
-                
+
                 info!("🎉 GPU found valid nonce!");
-                
+
                 Some(nonce)
             } else {
                 None
             };
-            
+
             // Free device memory
-            self.free_device_memory(d_kernel_auth_path, d_header_auth_path, d_threshold, d_result, d_found_nonce);
-            
+            self.free_device_memory(
+                d_kernel_auth_path,
+                d_header_auth_path,
+                d_threshold,
+                d_result,
+                d_found_nonce,
+            );
+
             Ok(found_nonce)
         }
     }
-    
+
     unsafe fn free_device_memory(
         &self,
         d_kernel_auth_path: *mut ::std::os::raw::c_void,
@@ -479,7 +592,7 @@ impl GpuMiner {
             hipFree(d_found_nonce);
         }
     }
-    
+
     // Get the number of available GPU devices
     pub fn get_device_count() -> Result<i32, String> {
         unsafe {
@@ -487,123 +600,195 @@ impl GpuMiner {
             let status = hipGetDeviceCount(&mut device_count);
             if status != hipSuccess {
                 error!("Failed to get GPU device count: error code {}", status);
-                return Err(format!("Failed to get GPU device count: error code {}", status));
+                return Err(format!(
+                    "Failed to get GPU device count: error code {}",
+                    status
+                ));
             }
-            
+
             info!("Detected {} GPU device(s)", device_count);
-            
+
             // Log information about each device
             for device_id in 0..device_count {
                 Self::log_device_info(device_id)?;
             }
-            
+
             Ok(device_count)
         }
     }
-    
+
     // Log detailed information about a specific GPU device
     fn log_device_info(device_id: i32) -> Result<(), String> {
         unsafe {
             // Get device name
             let mut name_buffer = [0u8; 256];
-            if hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id) != hipSuccess {
+            if hipDeviceGetName(
+                name_buffer.as_mut_ptr() as *mut i8,
+                name_buffer.len() as i32,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err(format!("Failed to get name for device {}", device_id));
             }
-            
+
             let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
                 .to_string_lossy()
                 .into_owned();
-                
+
             // Get compute units
             let mut compute_units = 0;
-            if hipDeviceGetAttribute(&mut compute_units, hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount, device_id) != hipSuccess {
-                return Err(format!("Failed to get compute units for device {}", device_id));
+            if hipDeviceGetAttribute(
+                &mut compute_units,
+                hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount,
+                device_id,
+            ) != hipSuccess
+            {
+                return Err(format!(
+                    "Failed to get compute units for device {}",
+                    device_id
+                ));
             }
-            
+
             // Get total memory
             let mut total_mem = 0;
             if hipDeviceTotalMem(&mut total_mem, device_id) != hipSuccess {
-                return Err(format!("Failed to get total memory for device {}", device_id));
+                return Err(format!(
+                    "Failed to get total memory for device {}",
+                    device_id
+                ));
             }
-            
+
             // Get clock rate
             let mut clock_rate = 0;
-            if hipDeviceGetAttribute(&mut clock_rate, hipDeviceAttribute_t_hipDeviceAttributeClockRate, device_id) != hipSuccess {
+            if hipDeviceGetAttribute(
+                &mut clock_rate,
+                hipDeviceAttribute_t_hipDeviceAttributeClockRate,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err(format!("Failed to get clock rate for device {}", device_id));
             }
-            
+
             // Get PCI bus ID
             let mut pci_bus_id = [0u8; 16];
-            if hipDeviceGetPCIBusId(pci_bus_id.as_mut_ptr() as *mut i8, pci_bus_id.len() as i32, device_id) != hipSuccess {
+            if hipDeviceGetPCIBusId(
+                pci_bus_id.as_mut_ptr() as *mut i8,
+                pci_bus_id.len() as i32,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err(format!("Failed to get PCI bus ID for device {}", device_id));
             }
-            
+
             let pci_id = std::ffi::CStr::from_ptr(pci_bus_id.as_ptr() as *const i8)
                 .to_string_lossy()
                 .into_owned();
-                
+
             // Get architecture
             let mut arch_major = 0;
             let mut arch_minor = 0;
-            if hipDeviceGetAttribute(&mut arch_major, hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMajor, device_id) != hipSuccess ||
-               hipDeviceGetAttribute(&mut arch_minor, hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMinor, device_id) != hipSuccess {
-                return Err(format!("Failed to get architecture for device {}", device_id));
+            if hipDeviceGetAttribute(
+                &mut arch_major,
+                hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMajor,
+                device_id,
+            ) != hipSuccess
+                || hipDeviceGetAttribute(
+                    &mut arch_minor,
+                    hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMinor,
+                    device_id,
+                ) != hipSuccess
+            {
+                return Err(format!(
+                    "Failed to get architecture for device {}",
+                    device_id
+                ));
             }
-            
+
             // Get warp size
             let mut warp_size = 0;
-            if hipDeviceGetAttribute(&mut warp_size, hipDeviceAttribute_t_hipDeviceAttributeWarpSize, device_id) != hipSuccess {
+            if hipDeviceGetAttribute(
+                &mut warp_size,
+                hipDeviceAttribute_t_hipDeviceAttributeWarpSize,
+                device_id,
+            ) != hipSuccess
+            {
                 return Err(format!("Failed to get warp size for device {}", device_id));
             }
-            
+
             // Get max threads per block
             let mut max_threads_per_block = 0;
-            if hipDeviceGetAttribute(&mut max_threads_per_block, hipDeviceAttribute_t_hipDeviceAttributeMaxThreadsPerBlock, device_id) != hipSuccess {
-                return Err(format!("Failed to get max threads per block for device {}", device_id));
+            if hipDeviceGetAttribute(
+                &mut max_threads_per_block,
+                hipDeviceAttribute_t_hipDeviceAttributeMaxThreadsPerBlock,
+                device_id,
+            ) != hipSuccess
+            {
+                return Err(format!(
+                    "Failed to get max threads per block for device {}",
+                    device_id
+                ));
             }
-            
+
             // Get max shared memory per block
             let mut max_shared_mem = 0;
-            if hipDeviceGetAttribute(&mut max_shared_mem, hipDeviceAttribute_t_hipDeviceAttributeMaxSharedMemoryPerBlock, device_id) != hipSuccess {
-                return Err(format!("Failed to get max shared memory for device {}", device_id));
+            if hipDeviceGetAttribute(
+                &mut max_shared_mem,
+                hipDeviceAttribute_t_hipDeviceAttributeMaxSharedMemoryPerBlock,
+                device_id,
+            ) != hipSuccess
+            {
+                return Err(format!(
+                    "Failed to get max shared memory for device {}",
+                    device_id
+                ));
             }
-            
+
             // Get ROCm device ID (for AMD GPUs)
             let mut rocm_device_id = 0;
-            let rocm_id_result = hipDeviceGetAttribute(&mut rocm_device_id, hipDeviceAttribute_t_hipDeviceAttributeDeviceId, device_id);
-            
+            let rocm_id_result = hipDeviceGetAttribute(
+                &mut rocm_device_id,
+                hipDeviceAttribute_t_hipDeviceAttributeDeviceId,
+                device_id,
+            );
+
             // Check if this is an AMD MI100 GPU
             let is_mi100 = device_name.contains("MI100");
-            
-            info!("🔍 GPU Device #{}: {} (PCI: {})", device_id, device_name, pci_id);
+
+            info!(
+                "🔍 GPU Device #{}: {} (PCI: {})",
+                device_id, device_name, pci_id
+            );
             info!("  - Compute Units: {}", compute_units);
             info!("  - Total Memory: {} MB", total_mem / (1024 * 1024));
             info!("  - Clock Rate: {} MHz", clock_rate / 1000);
             info!("  - Architecture: {}.{}", arch_major, arch_minor);
             info!("  - Warp Size: {}", warp_size);
             info!("  - Max Threads Per Block: {}", max_threads_per_block);
-            info!("  - Max Shared Memory Per Block: {} KB", max_shared_mem / 1024);
-            
+            info!(
+                "  - Max Shared Memory Per Block: {} KB",
+                max_shared_mem / 1024
+            );
+
             if rocm_id_result == hipSuccess {
                 info!("  - ROCm Device ID: {}", rocm_device_id);
             }
-            
+
             if is_mi100 {
                 info!("  - 🚀 Detected AMD MI100 GPU!");
             }
-            
+
             // Try to get HIP runtime version
             let mut hip_runtime_version = 0;
             if hipRuntimeGetVersion(&mut hip_runtime_version) == hipSuccess {
                 info!("  - HIP Runtime Version: {}", hip_runtime_version);
             }
-            
+
             // Try to get device runtime version
             let mut hip_driver_version = 0;
             if hipDriverGetVersion(&mut hip_driver_version) == hipSuccess {
                 info!("  - HIP Driver Version: {}", hip_driver_version);
             }
-            
+
             Ok(())
         }
     }
