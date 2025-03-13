@@ -72,17 +72,17 @@ impl Difficulty {
 
         threshold_as_bui.try_into().unwrap()
     }
-    
+
     /// Convert the difficulty to a u64 value for GPU mining
     pub fn as_u64(&self) -> u64 {
         // Use the first limb as the main value
         let mut result = self.0[0] as u64;
-        
+
         // Add the second limb if available, shifted appropriately
         if self.0.len() > 1 {
             result |= (self.0[1] as u64) << 32;
         }
-        
+
         // Ensure we never return 0 as difficulty
         if result == 0 {
             1

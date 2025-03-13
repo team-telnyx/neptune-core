@@ -38,16 +38,18 @@ pub unsafe extern "C" fn hipGetDeviceCount(count: *mut i32) -> i32 {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn hipGetDevice(device: *mut i32) -> i32 {
+    *device = 0; // Always return device 0
+    hipSuccess
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hipSetDevice(device: i32) -> i32 {
     hipSuccess
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hipDeviceGetName(
-    name: *mut i8,
-    len: i32,
-    device: i32,
-) -> i32 {
+pub unsafe extern "C" fn hipDeviceGetName(name: *mut i8, len: i32, device: i32) -> i32 {
     // Set name to "AMD MI100" with more detailed information
     let device_name = b"AMD Instinct MI100 Accelerator\0";
     let name_len = device_name.len().min(len as usize);
@@ -88,11 +90,7 @@ pub unsafe extern "C" fn hipDeviceTotalMem(bytes: *mut usize, device: i32) -> i3
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hipDeviceGetPCIBusId(
-    pciBusId: *mut i8,
-    len: i32,
-    device: i32,
-) -> i32 {
+pub unsafe extern "C" fn hipDeviceGetPCIBusId(pciBusId: *mut i8, len: i32, device: i32) -> i32 {
     let pci_id = b"0000:00:00.0\0";
     let id_len = pci_id.len().min(len as usize);
     std::ptr::copy_nonoverlapping(pci_id.as_ptr() as *const i8, pciBusId, id_len);
@@ -144,10 +142,7 @@ pub unsafe extern "C" fn hipMemcpy(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hipModuleLoad(
-    module: *mut hipModule_t,
-    fname: *const i8,
-) -> i32 {
+pub unsafe extern "C" fn hipModuleLoad(module: *mut hipModule_t, fname: *const i8) -> i32 {
     *module = std::ptr::null_mut();
     hipSuccess
 }
