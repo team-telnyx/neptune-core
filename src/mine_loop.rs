@@ -321,7 +321,7 @@ fn guess_worker(
                 kernel_path,
                 header_path,
                 threshold,
-                prev_difficulty.as_u64(),
+                prev_difficulty.as_u64(), // Using the as_u64 method to convert Difficulty to u64
             ) {
                 Ok(Some(nonce)) => {
                     info!("GPU found valid nonce!");

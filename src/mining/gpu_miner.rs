@@ -436,6 +436,12 @@ impl GpuMiner {
                 // ROCm 4.0+ supports gfx908 (MI100)
                 let has_gfx908_support = major >= 4;
                 
+                // For ROCm 6.2.3, we need special handling
+                let is_rocm_623 = major == 6 && minor == 2;
+                if is_rocm_623 {
+                    info!("Detected ROCm 6.2.3, will use specific optimizations for this version");
+                }
+                
                 // Check for MI100 GPUs directly
                 let has_mi100 = if has_mi100 {
                     info!("🚀 Detected AMD MI100 GPU, will use specific optimizations");
