@@ -127,7 +127,8 @@ thread-priority = "1.2.0"
 rayon = "1.10"
 humantime = "2.1.0"
 # HIP runtime for AMD GPU support
-hip-runtime-sys = "0.1"
+# Using version 0.1.2 which has better compatibility with ROCm 6.2.3
+hip-runtime-sys = "0.1.2"
 
 [dev-dependencies]
 
