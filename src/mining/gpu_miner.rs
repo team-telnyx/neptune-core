@@ -2,11 +2,17 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
-// Use our mock implementation instead of the real HIP runtime
-use super::hip_mock::*;
 use crate::prelude::twenty_first::math::digest::Digest;
 use rand::Rng;
 use tracing::*;
+
+// Use the actual HIP runtime when not in mock mode
+#[cfg(not(feature = "hip_mock"))]
+use hip_runtime_sys::*;
+
+// Use our mock implementation for testing
+#[cfg(feature = "hip_mock")]
+use super::hip_mock::*;
 
 use super::gpu_kernel::{create_gpu_kernel_source, MiningKernel};
 
@@ -406,56 +412,48 @@ impl GpuMiner {
                     "--genco".to_string(),
                     "-O3".to_string(),
                     "-fgpu-rdc".to_string(),
+                    "-v".to_string(), // Verbose output for better debugging
                 ];
 
-                // Get available GPU architectures from hipcc
-                let arch_output = std::process::Command::new("hipcc")
-                    .arg("--help")
+                // Get ROCm version for compiler flags
+                let rocm_version_output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+' || echo '0.0'")
                     .output()
-                    .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
-                    .unwrap_or_else(|_| String::new());
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "0.0".to_string());
 
-                // Try alternative method if the first one doesn't work
-                let arch_output = if arch_output.is_empty() || !arch_output.contains("--offload-arch") {
-                    info!("Trying alternative method to detect supported architectures");
-                    std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg("hipconfig --version || echo 'unknown'")
-                        .output()
-                        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
-                        .unwrap_or_else(|_| String::new())
+                let parts: Vec<&str> = rocm_version_output.split('.').collect();
+                let (major, minor) = if parts.len() >= 2 {
+                    (parts[0].parse::<u32>().unwrap_or(0), parts[1].parse::<u32>().unwrap_or(0))
                 } else {
-                    arch_output
+                    (0, 0)
                 };
 
-                // Check if gfx908 is supported
-                let has_gfx908_support = arch_output.contains("gfx908");
+                info!("Detected ROCm version: {}.{}", major, minor);
+
+                // Check if gfx908 (MI100) architecture is supported
+                // ROCm 4.0+ supports gfx908 (MI100)
+                let has_gfx908_support = major >= 4;
                 
-                // If we still can't determine, try to check if we're on ROCm 5.0 or newer
-                let has_gfx908_support = if !has_gfx908_support {
-                    let rocm_version = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+' || echo '0.0'")
-                        .output()
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-                        .unwrap_or_else(|_| "0.0".to_string());
-                    
-                    // Parse major and minor version
-                    let parts: Vec<&str> = rocm_version.split('.').collect();
-                    if parts.len() >= 2 {
-                        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                            // ROCm 5.0 and newer should support gfx908
-                            let supports_gfx908 = major >= 5;
-                            info!("Detected ROCm version {}.{}, gfx908 support: {}", major, minor, supports_gfx908);
-                            supports_gfx908
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
+                // Check for MI100 GPUs directly
+                let has_mi100 = if has_mi100 {
+                    info!("🚀 Detected AMD MI100 GPU, will use specific optimizations");
+                    true
                 } else {
-                    has_gfx908_support
+                    // Try to detect MI100 GPUs using rocm-smi
+                    let gpu_info = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg("rocm-smi --showproductname | grep -i MI100 || echo ''")
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                        .unwrap_or_else(|_| String::new());
+                    
+                    let found_mi100 = !gpu_info.trim().is_empty();
+                    if found_mi100 {
+                        info!("🚀 Detected AMD MI100 GPU via rocm-smi, will use specific optimizations");
+                    }
+                    found_mi100
                 };
                 
                 // Add MI100-specific optimizations if detected and supported
@@ -464,14 +462,47 @@ impl GpuMiner {
                     
                     if has_gfx908_support {
                         info!("gfx908 architecture is supported by hipcc, using MI100-specific optimizations");
-                        compiler_args.push("-march=gfx908".to_string());
-                        compiler_args.push("-mcumode".to_string());
-                        compiler_args.push("--offload-arch=gfx908".to_string());
-                        compiler_args.push("-mwavefrontsize64".to_string());
+                        
+                        // Use the correct flag format based on ROCm version
+                        if major >= 6 {
+                            // ROCm 6.x syntax (specifically for 6.2.3)
+                            info!("Using ROCm 6.2.3 compatible flags for MI100");
+                            compiler_args.push("--offload-arch=gfx908".to_string());
+                            compiler_args.push("-mcumode".to_string());
+                            compiler_args.push("-mwavefrontsize64".to_string());
+                        } else if major >= 5 {
+                            // ROCm 5.x syntax
+                            info!("Using ROCm 5.x compatible flags for MI100");
+                            compiler_args.push("--amdgpu-target=gfx908".to_string());
+                            compiler_args.push("-mcumode".to_string());
+                            compiler_args.push("-mwavefrontsize64".to_string());
+                        } else {
+                            // ROCm 4.x and older syntax
+                            info!("Using ROCm 4.x compatible flags for MI100");
+                            compiler_args.push("-march=gfx908".to_string());
+                        }
+                        
+                        // Add additional MI100-specific optimizations
+                        compiler_args.push("-mllvm".to_string());
+                        compiler_args.push("-amdgpu-sroa=0".to_string());
+                        compiler_args.push("-mllvm".to_string());
+                        compiler_args.push("-amdgpu-load-store-vectorizer=0".to_string());
+                        
+                        // Add shared memory optimizations for MI100
+                        compiler_args.push("-mllvm".to_string());
+                        compiler_args.push("-amdgpu-enable-flat-scratch".to_string());
                     } else {
                         // Use generic AMD GPU flags instead
                         info!("gfx908 architecture not supported by hipcc, using generic AMD GPU flags");
-                        compiler_args.push("--amdgpu-target=gfx900".to_string()); // More widely supported
+                        
+                        // Try to use a compatible architecture based on ROCm version
+                        if major >= 6 {
+                            compiler_args.push("--offload-arch=gfx900".to_string());
+                        } else if major >= 5 {
+                            compiler_args.push("--amdgpu-target=gfx900".to_string());
+                        } else {
+                            compiler_args.push("-march=gfx900".to_string());
+                        }
                     }
                 }
 
