@@ -337,28 +337,134 @@ impl MiningKernel {
             }
         }
 
-        // Try to compile the kernel using hipcc with verbose output
-        info!("Compiling GPU kernel with hipcc...");
+        // Check if gfx908 architecture is supported
+        info!("Checking for gfx908 architecture support...");
+        let arch_check = std::process::Command::new("hipcc")
+            .arg("--help")
+            .output();
+            
+        let has_gfx908_support = match arch_check {
+            Ok(output) => {
+                let help_text = String::from_utf8_lossy(&output.stdout);
+                let supported = help_text.contains("gfx908");
+                if supported {
+                    info!("gfx908 architecture is supported by hipcc");
+                } else {
+                    info!("gfx908 architecture is NOT supported by hipcc, will use generic flags");
+                }
+                supported
+            },
+            Err(_) => {
+                warn!("Failed to check hipcc supported architectures, assuming gfx908 is not supported");
+                false
+            }
+        };
+        
+        // Prepare compiler arguments based on architecture support
+        let mut compiler_args = vec![
+            "--genco".to_string(),
+            "-O3".to_string(),
+            "-fgpu-rdc".to_string(),
+            "-v".to_string(), // Verbose output
+        ];
+        
+        // Try to detect supported architectures directly
+        let supported_archs = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("hipcc -### 2>&1 | grep -o \"--offload-arch=[^ ]*\" | sort -u || echo \"\"")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+            .unwrap_or_else(|_| String::new());
+            
+        info!("Detected supported architectures: {}", 
+            if supported_archs.is_empty() { "none detected" } else { &supported_archs });
+            
+        // Check if we have any MI100-compatible architectures
+        let has_mi100_arch = supported_archs.contains("gfx908") || 
+                            supported_archs.contains("gfx90a") ||
+                            supported_archs.contains("cdna") ||
+                            supported_archs.contains("mi100");
+                            
+        // Add architecture-specific flags
+        if has_gfx908_support || has_mi100_arch {
+            info!("Using MI100-specific optimizations (gfx908)");
+            
+            // Try different flag combinations based on ROCm version
+            let rocm_version = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+' || echo '0.0'")
+                .output()
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                .unwrap_or_else(|_| "0.0".to_string());
+                
+            let parts: Vec<&str> = rocm_version.split('.').collect();
+            let (major, minor) = if parts.len() >= 2 {
+                (parts[0].parse::<u32>().unwrap_or(0), parts[1].parse::<u32>().unwrap_or(0))
+            } else {
+                (0, 0)
+            };
+            
+            info!("Detected ROCm version: {}.{}", major, minor);
+            
+            if major >= 6 {
+                // ROCm 6.x syntax
+                compiler_args.extend_from_slice(&[
+                    "--offload-arch=gfx908".to_string(),
+                    "-ffp-contract=fast".to_string(),
+                ]);
+            } else if major >= 5 {
+                // ROCm 5.x syntax
+                compiler_args.extend_from_slice(&[
+                    "-march=gfx908".to_string(),
+                    "--offload-arch=gfx908".to_string(),
+                    "-ffp-contract=fast".to_string(),
+                ]);
+            } else {
+                // Older ROCm syntax
+                compiler_args.extend_from_slice(&[
+                    "--amdgpu-target=gfx908".to_string(),
+                    "-ffp-contract=fast".to_string(),
+                ]);
+            }
+        } else {
+            // Try to find a suitable architecture from the list of supported ones
+            let mut found_arch = false;
+            
+            // List of architectures to try in order of preference
+            let arch_list = ["gfx900", "gfx906", "gfx90a", "gfx1030", "gfx1010"];
+            
+            for arch in arch_list.iter() {
+                if supported_archs.contains(arch) {
+                    info!("Using detected architecture: {}", arch);
+                    compiler_args.extend_from_slice(&[
+                        format!("--offload-arch={}", arch),
+                        "-ffp-contract=fast".to_string(),
+                    ]);
+                    found_arch = true;
+                    break;
+                }
+            }
+            
+            // If no specific architecture was found, use generic flags
+            if !found_arch {
+                info!("Using generic AMD GPU optimizations");
+                compiler_args.extend_from_slice(&[
+                    "-ffp-contract=fast".to_string(),
+                ]);
+            }
+        }
+        
+        // Add output file and source file
+        compiler_args.extend_from_slice(&[
+            "-o".to_string(),
+            "mining_kernel.hsaco".to_string(),
+            source_file.to_string(),
+        ]);
+        
+        // Try to compile the kernel using hipcc with the determined flags
+        info!("Compiling GPU kernel with hipcc using flags: {:?}", compiler_args);
         let output = std::process::Command::new("hipcc")
-            .args(&[
-                "--genco",
-                "-O3",
-                "-fgpu-rdc",
-                "-v",            // Verbose output
-                "-march=gfx908", // MI100 specific
-                "-mcumode",
-                "--offload-arch=gfx908",
-                "-mwavefrontsize64",
-                "-mno-wavefrontsize32",
-                "-ffp-contract=fast",
-                "-mllvm",
-                "-amdgpu-early-inline-all=true",
-                "-mllvm",
-                "-amdgpu-function-calls=false",
-                "-o",
-                "mining_kernel.hsaco",
-                source_file,
-            ])
+            .args(&compiler_args)
             .output();
 
         match output {
