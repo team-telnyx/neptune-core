@@ -482,15 +482,23 @@ impl GpuMiner {
                             compiler_args.push("-march=gfx908".to_string());
                         }
                         
-                        // Add additional MI100-specific optimizations
-                        compiler_args.push("-mllvm".to_string());
-                        compiler_args.push("-amdgpu-sroa=0".to_string());
-                        compiler_args.push("-mllvm".to_string());
-                        compiler_args.push("-amdgpu-load-store-vectorizer=0".to_string());
-                        
-                        // Add shared memory optimizations for MI100
-                        compiler_args.push("-mllvm".to_string());
-                        compiler_args.push("-amdgpu-enable-flat-scratch".to_string());
+                        // Add additional MI100-specific optimizations for ROCm 6.2.3
+                        // Use the correct flag format for ROCm 6.2.3
+                        // Note: ROCm 6.2.3 uses different flag format than older versions
+                        if major >= 6 {
+                            // For ROCm 6.x, use the new flag format with double dashes
+                            compiler_args.push("--amdgpu-sroa=0".to_string());
+                            compiler_args.push("--amdgpu-load-store-vectorizer=0".to_string());
+                            compiler_args.push("--amdgpu-enable-flat-scratch".to_string());
+                        } else {
+                            // For older ROCm versions, use -mllvm prefix
+                            compiler_args.push("-mllvm".to_string());
+                            compiler_args.push("-amdgpu-sroa=0".to_string());
+                            compiler_args.push("-mllvm".to_string());
+                            compiler_args.push("-amdgpu-load-store-vectorizer=0".to_string());
+                            compiler_args.push("-mllvm".to_string());
+                            compiler_args.push("-amdgpu-enable-flat-scratch".to_string());
+                        }
                     } else {
                         // Use generic AMD GPU flags instead
                         info!("gfx908 architecture not supported by hipcc, using generic AMD GPU flags");

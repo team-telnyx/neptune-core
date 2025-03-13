@@ -346,24 +346,47 @@ impl MiningKernel {
 
         // Check if gfx908 architecture is supported
         info!("Checking for gfx908 architecture support...");
-        let arch_check = std::process::Command::new("hipcc")
-            .arg("--help")
-            .output();
-            
-        let has_gfx908_support = match arch_check {
-            Ok(output) => {
-                let help_text = String::from_utf8_lossy(&output.stdout);
-                let supported = help_text.contains("gfx908");
-                if supported {
-                    info!("gfx908 architecture is supported by hipcc");
-                } else {
-                    info!("gfx908 architecture is NOT supported by hipcc, will use generic flags");
+        
+        // First, check ROCm version to determine the best approach
+        let rocm_version = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' || echo 'unknown'")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        
+        info!("Detected ROCm version: {}", rocm_version);
+        
+        // Parse ROCm version
+        let version_parts: Vec<&str> = rocm_version.split('.').collect();
+        let major: u32 = version_parts.get(0).and_then(|v| v.parse().ok()).unwrap_or(0);
+        let minor: u32 = version_parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        
+        // For ROCm 6.2.3, we know gfx908 is supported for MI100
+        let has_gfx908_support = if major == 6 && minor == 2 {
+            info!("ROCm 6.2.3 detected, gfx908 architecture is supported for MI100");
+            true
+        } else {
+            // For other versions, check via hipcc help
+            let arch_check = std::process::Command::new("hipcc")
+                .arg("--help")
+                .output();
+
+            match arch_check {
+                Ok(output) => {
+                    let help_text = String::from_utf8_lossy(&output.stdout);
+                    let supported = help_text.contains("gfx908");
+                    if supported {
+                        info!("gfx908 architecture is supported by hipcc");
+                    } else {
+                        info!("gfx908 architecture is NOT supported by hipcc, will use generic flags");
+                    }
+                    supported
+                },
+                Err(_) => {
+                    warn!("Failed to check hipcc supported architectures, assuming gfx908 is not supported");
+                    false
                 }
-                supported
-            },
-            Err(_) => {
-                warn!("Failed to check hipcc supported architectures, assuming gfx908 is not supported");
-                false
             }
         };
         
@@ -414,23 +437,51 @@ impl MiningKernel {
             info!("Detected ROCm version: {}.{}", major, minor);
             
             if major >= 6 {
-                // ROCm 6.x syntax
-                compiler_args.extend_from_slice(&[
-                    "--offload-arch=gfx908".to_string(),
-                    "-ffp-contract=fast".to_string(),
-                ]);
+                // ROCm 6.x syntax (specifically for 6.2.3)
+                info!("Using ROCm 6.x compatible flags for MI100");
+                
+                // For ROCm 6.2.3, use the correct flag format
+                if major == 6 && minor == 2 {
+                    info!("Adding ROCm 6.2.3 specific flags for MI100");
+                    compiler_args.extend_from_slice(&[
+                        "--offload-arch=gfx908".to_string(),
+                        "-mcumode".to_string(),
+                        "-mwavefrontsize64".to_string(),
+                        "-ffp-contract=fast".to_string(),
+                        // Use double-dash format for ROCm 6.2.3
+                        "--amdgpu-sroa=0".to_string(),
+                        "--amdgpu-load-store-vectorizer=0".to_string(),
+                        "--amdgpu-enable-flat-scratch".to_string(),
+                    ]);
+                } else {
+                    // Generic ROCm 6.x flags
+                    compiler_args.extend_from_slice(&[
+                        "--offload-arch=gfx908".to_string(),
+                        "-ffp-contract=fast".to_string(),
+                    ]);
+                }
             } else if major >= 5 {
                 // ROCm 5.x syntax
+                info!("Using ROCm 5.x compatible flags for MI100");
                 compiler_args.extend_from_slice(&[
                     "-march=gfx908".to_string(),
                     "--offload-arch=gfx908".to_string(),
                     "-ffp-contract=fast".to_string(),
+                    // Add MI100-specific optimizations for ROCm 5.x
+                    "-mllvm".to_string(), "-amdgpu-sroa=0".to_string(),
+                    "-mllvm".to_string(), "-amdgpu-load-store-vectorizer=0".to_string(),
+                    "-mllvm".to_string(), "-amdgpu-enable-flat-scratch".to_string(),
                 ]);
             } else {
                 // Older ROCm syntax
+                info!("Using older ROCm compatible flags for MI100");
                 compiler_args.extend_from_slice(&[
                     "--amdgpu-target=gfx908".to_string(),
                     "-ffp-contract=fast".to_string(),
+                    // Add MI100-specific optimizations for older ROCm
+                    "-mllvm".to_string(), "-amdgpu-sroa=0".to_string(),
+                    "-mllvm".to_string(), "-amdgpu-load-store-vectorizer=0".to_string(),
+                    "-mllvm".to_string(), "-amdgpu-enable-flat-scratch".to_string(),
                 ]);
             }
         } else {
