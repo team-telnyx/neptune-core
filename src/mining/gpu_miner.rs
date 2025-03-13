@@ -376,7 +376,7 @@ impl GpuMiner {
             // MI100 GPUs can handle larger batches
             let nonce_range = if self.device_name.contains("MI100") {
                 // MI100 has 120 compute units, can handle larger batches
-                2_000_000_000 // 2 billion nonces per kernel launch for MI100
+                5_000_000_000 // 5 billion nonces per kernel launch for MI100
             } else {
                 1_000_000_000 // 1 billion nonces for other GPUs
             };

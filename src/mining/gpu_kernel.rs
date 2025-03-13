@@ -11,6 +11,7 @@ pub struct MiningKernel {
     difficulty: u64,
     nonce_start: u64,
     nonce_range: u64,
+    device_name: String,
 }
 
 // Static variable to track if we've initialized the GPU kernel module
@@ -20,10 +21,24 @@ static mut GPU_KERNEL_FUNCTION: *mut c_void = std::ptr::null_mut();
 
 impl MiningKernel {
     pub fn new(difficulty: u64, nonce_start: u64, nonce_range: u64) -> Self {
+        // Get device name from current device
+        let device_name = unsafe {
+            let mut device_id = 0;
+            hipGetDevice(&mut device_id);
+            
+            let mut name_buffer = [0u8; 256];
+            hipDeviceGetName(name_buffer.as_mut_ptr() as *mut i8, name_buffer.len() as i32, device_id);
+            
+            std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+                .to_string_lossy()
+                .into_owned()
+        };
+        
         Self {
             difficulty,
             nonce_start,
             nonce_range,
+            device_name,
         }
     }
 
@@ -51,8 +66,14 @@ impl MiningKernel {
             z: 1,
         };
 
-        // Shared memory size
-        let shared_mem_size = 0;
+        // Use shared memory for MI100 GPUs
+        let shared_mem_size = if self.device_name.contains("MI100") {
+            // Use 64KB of shared memory for MI100 GPUs
+            65536
+        } else {
+            // Default shared memory size
+            0
+        };
 
         // Initialize the GPU kernel if not already done
         let kernel_ptr = self.initialize_gpu_kernel()?;
@@ -271,6 +292,14 @@ impl MiningKernel {
                 "-O3",
                 "-fgpu-rdc",
                 "-v", // Verbose output
+                "-march=gfx908", // MI100 specific
+                "-mcumode",
+                "--offload-arch=gfx908",
+                "-mwavefrontsize64",
+                "-mno-wavefrontsize32",
+                "-ffp-contract=fast",
+                "-mllvm", "-amdgpu-early-inline-all=true",
+                "-mllvm", "-amdgpu-function-calls=false",
                 "-o", "mining_kernel.hsaco",
                 source_file
             ])
@@ -573,14 +602,19 @@ pub fn create_gpu_kernel_source() -> String {
         __shared__ Digest shared_header_auth[3];
         __shared__ Digest shared_threshold;
         
-        // First thread in each block loads shared data
+        // Additional shared memory for MI100 GPUs to store intermediate results
+        // This reduces global memory access and improves performance
+        __shared__ uint64_t shared_state[8 * 32]; // 32 threads can store their state
+        
+        // Use cooperative loading of shared memory for better performance
+        // Each thread loads a portion of the data
+        if (thread_idx < 2) {
+            shared_kernel_auth[thread_idx] = kernel_auth_path[thread_idx];
+        }
+        if (thread_idx < 3) {
+            shared_header_auth[thread_idx] = header_auth_path[thread_idx];
+        }
         if (thread_idx == 0) {
-            for (int i = 0; i < 2; i++) {
-                shared_kernel_auth[i] = kernel_auth_path[i];
-            }
-            for (int i = 0; i < 3; i++) {
-                shared_header_auth[i] = header_auth_path[i];
-            }
             shared_threshold = *threshold;
         }
         
@@ -605,8 +639,45 @@ pub fn create_gpu_kernel_source() -> String {
         // Calculate header MAST hash
         Digest hash1, hash2, header_mast_hash;
         
-        // Hash nonce
-        tip5_hash_varlen(&hash1, encoded_nonce, sizeof(encoded_nonce));
+        // Get shared memory index for this thread (for intermediate state)
+        uint32_t shared_idx = thread_idx % 32;
+        uint64_t* thread_state = &shared_state[shared_idx * 8];
+        
+        // Hash nonce using shared memory for state
+        // Initialize state with IV
+        for (int i = 0; i < 8; i++) {
+            thread_state[i] = TIP5_IV[i];
+        }
+        
+        // Process nonce directly in shared memory
+        for (int i = 0; i < 5; i++) {
+            thread_state[i % 8] ^= encoded_nonce[i];
+        }
+        
+        // Perform mixing rounds directly in shared memory
+        for (int round = 0; round < 12; round++) {
+            // Mix columns
+            for (int j = 0; j < 4; j++) {
+                thread_state[j] += thread_state[j + 4];
+                thread_state[j + 4] = ((thread_state[j + 4] << 32) | (thread_state[j + 4] >> 32)) ^ thread_state[j];
+            }
+            
+            // Mix rows
+            uint64_t temp = thread_state[1];
+            thread_state[1] = thread_state[2];
+            thread_state[2] = thread_state[3];
+            thread_state[3] = temp;
+            
+            temp = thread_state[5];
+            thread_state[5] = thread_state[6];
+            thread_state[6] = thread_state[7];
+            thread_state[7] = temp;
+        }
+        
+        // Finalize result
+        for (int i = 0; i < 4; i++) {
+            hash1.values[i] = thread_state[i] ^ thread_state[i + 4];
+        }
         
         // Build header MAST hash using shared memory
         tip5_hash_pair(&hash2, &hash1, &shared_header_auth[0]);

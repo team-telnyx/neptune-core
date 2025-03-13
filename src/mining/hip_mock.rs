@@ -48,8 +48,8 @@ pub unsafe extern "C" fn hipDeviceGetName(
     len: i32,
     device: i32,
 ) -> i32 {
-    // Set name to "AMD MI100"
-    let device_name = b"AMD MI100\0";
+    // Set name to "AMD MI100" with more detailed information
+    let device_name = b"AMD Instinct MI100 Accelerator\0";
     let name_len = device_name.len().min(len as usize);
     std::ptr::copy_nonoverlapping(device_name.as_ptr() as *const i8, name, name_len);
     hipSuccess
@@ -62,13 +62,19 @@ pub unsafe extern "C" fn hipDeviceGetAttribute(
     device: i32,
 ) -> i32 {
     match attr {
+        // MI100 has 120 compute units
         hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount => *value = 120,
-        hipDeviceAttribute_t_hipDeviceAttributeClockRate => *value = 1500,
+        // MI100 has 1502 MHz clock rate
+        hipDeviceAttribute_t_hipDeviceAttributeClockRate => *value = 1502000,
         hipDeviceAttribute_t_hipDeviceAttributeDeviceId => *value = 0,
+        // MI100 is based on CDNA architecture (gfx908)
         hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMajor => *value = 9,
         hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMinor => *value = 0,
+        // MI100 has 64 threads per wavefront
         hipDeviceAttribute_t_hipDeviceAttributeWarpSize => *value = 64,
+        // MI100 supports 1024 threads per block
         hipDeviceAttribute_t_hipDeviceAttributeMaxThreadsPerBlock => *value = 1024,
+        // MI100 has 64KB of shared memory per block
         hipDeviceAttribute_t_hipDeviceAttributeMaxSharedMemoryPerBlock => *value = 65536,
         _ => *value = 0,
     }
@@ -77,7 +83,7 @@ pub unsafe extern "C" fn hipDeviceGetAttribute(
 
 #[no_mangle]
 pub unsafe extern "C" fn hipDeviceTotalMem(bytes: *mut usize, device: i32) -> i32 {
-    *bytes = 32 * 1024 * 1024 * 1024; // 32GB
+    *bytes = 32 * 1024 * 1024 * 1024; // 32GB (MI100 has 32GB HBM2 memory)
     hipSuccess
 }
 
@@ -95,13 +101,13 @@ pub unsafe extern "C" fn hipDeviceGetPCIBusId(
 
 #[no_mangle]
 pub unsafe extern "C" fn hipRuntimeGetVersion(version: *mut i32) -> i32 {
-    *version = 50200; // ROCm 5.2.0
+    *version = 60203; // ROCm 6.2.3 (matches the version in the Jira ticket)
     hipSuccess
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn hipDriverGetVersion(version: *mut i32) -> i32 {
-    *version = 50200; // ROCm 5.2.0
+    *version = 60203; // ROCm 6.2.3 (matches the version in the Jira ticket)
     hipSuccess
 }
 
