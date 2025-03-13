@@ -59,9 +59,9 @@ impl Stream {
 }
 
 impl GpuMiner {
-    pub fn new(device_id: i32) -> Result<Self, String> {
+    // Get the number of available GPU devices
+    pub fn get_device_count() -> Result<i32, String> {
         unsafe {
-            // Get device count and log information about available devices
             let mut device_count = 0;
             let status = hipGetDeviceCount(&mut device_count);
             if status != hipSuccess {
@@ -71,6 +71,153 @@ impl GpuMiner {
                     status
                 ));
             }
+            Ok(device_count)
+        }
+    }
+
+    // Log information about a specific GPU device
+    unsafe fn log_device_info(device_id: i32) -> Result<(), String> {
+        let mut name_buffer = [0u8; 256];
+        if hipDeviceGetName(
+            name_buffer.as_mut_ptr() as *mut i8,
+            name_buffer.len() as i32,
+            device_id,
+        ) != hipSuccess
+        {
+            return Err(format!("Failed to get device name for device {}", device_id));
+        }
+
+        let device_name = std::ffi::CStr::from_ptr(name_buffer.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        let mut compute_units = 0;
+        if hipDeviceGetAttribute(
+            &mut compute_units,
+            hipDeviceAttribute_t_hipDeviceAttributeMultiprocessorCount,
+            device_id,
+        ) != hipSuccess
+        {
+            warn!("Failed to get compute unit count for device {}", device_id);
+        }
+
+        let mut clock_rate = 0;
+        if hipDeviceGetAttribute(
+            &mut clock_rate,
+            hipDeviceAttribute_t_hipDeviceAttributeClockRate,
+            device_id,
+        ) != hipSuccess
+        {
+            warn!("Failed to get clock rate for device {}", device_id);
+        }
+
+        let mut total_mem = 0;
+        hipDeviceTotalMem(&mut total_mem, device_id);
+
+        // Get PCI bus ID
+        let mut pci_bus_id = [0u8; 64];
+        if hipDeviceGetPCIBusId(
+            pci_bus_id.as_mut_ptr() as *mut i8,
+            pci_bus_id.len() as i32,
+            device_id,
+        ) != hipSuccess
+        {
+            warn!("Failed to get PCI bus ID for device {}", device_id);
+        }
+
+        let pci_id = std::ffi::CStr::from_ptr(pci_bus_id.as_ptr() as *const i8)
+            .to_string_lossy()
+            .into_owned();
+
+        info!("🔍 GPU Device #{}: {} (PCI: {})", device_id, device_name, pci_id);
+        info!("  - Compute Units: {}", compute_units);
+        info!("  - Total Memory: {} MB", total_mem / (1024 * 1024));
+        info!("  - Clock Rate: {} MHz", clock_rate / 1000);
+
+        // Get architecture information
+        let mut major = 0;
+        let mut minor = 0;
+        if hipDeviceGetAttribute(
+            &mut major,
+            hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMajor,
+            device_id,
+        ) == hipSuccess
+            && hipDeviceGetAttribute(
+                &mut minor,
+                hipDeviceAttribute_t_hipDeviceAttributeComputeCapabilityMinor,
+                device_id,
+            ) == hipSuccess
+        {
+            info!("  - Architecture: {}.{}", major, minor);
+        }
+
+        // Get warp size
+        let mut warp_size = 0;
+        if hipDeviceGetAttribute(
+            &mut warp_size,
+            hipDeviceAttribute_t_hipDeviceAttributeWarpSize,
+            device_id,
+        ) == hipSuccess
+        {
+            info!("  - Warp Size: {}", warp_size);
+        }
+
+        // Get max threads per block
+        let mut max_threads = 0;
+        if hipDeviceGetAttribute(
+            &mut max_threads,
+            hipDeviceAttribute_t_hipDeviceAttributeMaxThreadsPerBlock,
+            device_id,
+        ) == hipSuccess
+        {
+            info!("  - Max Threads Per Block: {}", max_threads);
+        }
+
+        // Get max shared memory per block
+        let mut max_shared_mem = 0;
+        if hipDeviceGetAttribute(
+            &mut max_shared_mem,
+            hipDeviceAttribute_t_hipDeviceAttributeMaxSharedMemoryPerBlock,
+            device_id,
+        ) == hipSuccess
+        {
+            info!("  - Max Shared Memory Per Block: {} KB", max_shared_mem / 1024);
+        }
+
+        // Get ROCm device ID
+        let mut rocm_device_id = 0;
+        if hipDeviceGetAttribute(
+            &mut rocm_device_id,
+            hipDeviceAttribute_t_hipDeviceAttributeDeviceId,
+            device_id,
+        ) == hipSuccess
+        {
+            info!("  - ROCm Device ID: {}", rocm_device_id);
+        }
+
+        // Check if this is an MI100 GPU
+        if device_name.contains("MI100") {
+            info!("  - 🚀 Detected AMD MI100 GPU!");
+        }
+
+        // Get HIP runtime and driver versions
+        let mut runtime_version = 0;
+        if hipRuntimeGetVersion(&mut runtime_version) == hipSuccess {
+            info!("  - HIP Runtime Version: {}", runtime_version);
+        }
+
+        let mut driver_version = 0;
+        if hipDriverGetVersion(&mut driver_version) == hipSuccess {
+            info!("  - HIP Driver Version: {}", driver_version);
+        }
+
+        Ok(())
+    }
+
+    pub fn new(device_id: i32) -> Result<Self, String> {
+        unsafe {
+            // Get device count and log information about available devices
+            let device_count = Self::get_device_count()?;
 
             info!(
                 "Initializing GPU miner. Found {} GPU device(s)",
@@ -261,12 +408,71 @@ impl GpuMiner {
                     "-fgpu-rdc".to_string(),
                 ];
 
-                // Add MI100-specific optimizations if detected
+                // Get available GPU architectures from hipcc
+                let arch_output = std::process::Command::new("hipcc")
+                    .arg("--help")
+                    .output()
+                    .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                    .unwrap_or_else(|_| String::new());
+
+                // Try alternative method if the first one doesn't work
+                let arch_output = if arch_output.is_empty() || !arch_output.contains("--offload-arch") {
+                    info!("Trying alternative method to detect supported architectures");
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg("hipconfig --version || echo 'unknown'")
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                        .unwrap_or_else(|_| String::new())
+                } else {
+                    arch_output
+                };
+
+                // Check if gfx908 is supported
+                let has_gfx908_support = arch_output.contains("gfx908");
+                
+                // If we still can't determine, try to check if we're on ROCm 5.0 or newer
+                let has_gfx908_support = if !has_gfx908_support {
+                    let rocm_version = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg("rocm-smi --showdriverversion | grep -oE '[0-9]+\\.[0-9]+' || echo '0.0'")
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                        .unwrap_or_else(|_| "0.0".to_string());
+                    
+                    // Parse major and minor version
+                    let parts: Vec<&str> = rocm_version.split('.').collect();
+                    if parts.len() >= 2 {
+                        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            // ROCm 5.0 and newer should support gfx908
+                            let supports_gfx908 = major >= 5;
+                            info!("Detected ROCm version {}.{}, gfx908 support: {}", major, minor, supports_gfx908);
+                            supports_gfx908
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    has_gfx908_support
+                };
+                
+                // Add MI100-specific optimizations if detected and supported
                 if has_mi100 {
-                    compiler_args.push("-march=gfx908".to_string());
-                    compiler_args.push("-mcumode".to_string());
-                    compiler_args.push("--offload-arch=gfx908".to_string());
-                    compiler_args.push("-mwavefrontsize64".to_string());
+                    info!("Detected AMD MI100 GPU, checking for gfx908 architecture support");
+                    
+                    if has_gfx908_support {
+                        info!("gfx908 architecture is supported by hipcc, using MI100-specific optimizations");
+                        compiler_args.push("-march=gfx908".to_string());
+                        compiler_args.push("-mcumode".to_string());
+                        compiler_args.push("--offload-arch=gfx908".to_string());
+                        compiler_args.push("-mwavefrontsize64".to_string());
+                    } else {
+                        // Use generic AMD GPU flags instead
+                        info!("gfx908 architecture not supported by hipcc, using generic AMD GPU flags");
+                        compiler_args.push("--amdgpu-target=gfx900".to_string()); // More widely supported
+                    }
                 }
 
                 // Add output file and source file
