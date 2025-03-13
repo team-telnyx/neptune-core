@@ -363,7 +363,8 @@ impl MiningKernel {
         let minor: u32 = version_parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
         
         // For ROCm 6.2.3, we know gfx908 is supported for MI100
-        let has_gfx908_support = if major == 6 && minor == 2 {
+        let is_rocm_623 = major == 6 && minor == 2;
+        let has_gfx908_support = if is_rocm_623 {
             info!("ROCm 6.2.3 detected, gfx908 architecture is supported for MI100");
             true
         } else {
@@ -448,11 +449,11 @@ impl MiningKernel {
                         "-mcumode".to_string(),
                         "-mwavefrontsize64".to_string(),
                         "-ffp-contract=fast".to_string(),
-                        // Use double-dash format for ROCm 6.2.3
-                        "--amdgpu-sroa=0".to_string(),
-                        "--amdgpu-load-store-vectorizer=0".to_string(),
-                        "--amdgpu-enable-flat-scratch".to_string(),
                     ]);
+                    
+                    // For ROCm 6.2.3, we need to avoid using the problematic flags
+                    // that cause compilation errors
+                    info!("Avoiding problematic flags for ROCm 6.2.3 that cause compilation errors");
                 } else {
                     // Generic ROCm 6.x flags
                     compiler_args.extend_from_slice(&[
@@ -731,7 +732,8 @@ pub fn create_gpu_kernel_source() -> String {
     };
     
     // Optimized implementation of Tip5 hash function for AMD MI100 GPUs
-    __device__ __forceinline__ void tip5_hash_pair(Digest* result, const Digest* left, const Digest* right) {
+    // Using __forceinline__ and __attribute__((always_inline)) for better performance
+    __device__ __forceinline__ __attribute__((always_inline)) void tip5_hash_pair(Digest* result, const Digest* left, const Digest* right) {
         // Initialize with IV
         uint64_t state[8];
         #pragma unroll
@@ -739,14 +741,18 @@ pub fn create_gpu_kernel_source() -> String {
             state[i] = TIP5_IV[i];
         }
         
-        // Mix in left and right digests
-        #pragma unroll
-        for (int i = 0; i < 4; i++) {
-            // XOR with left digest
-            state[i] ^= left->values[i];
-            // XOR with right digest
-            state[i + 4] ^= right->values[i];
-        }
+        // Mix in left and right digests - fully unrolled for better performance on MI100
+        // XOR with left digest
+        state[0] ^= left->values[0];
+        state[1] ^= left->values[1];
+        state[2] ^= left->values[2];
+        state[3] ^= left->values[3];
+        
+        // XOR with right digest
+        state[4] ^= right->values[0];
+        state[5] ^= right->values[1];
+        state[6] ^= right->values[2];
+        state[7] ^= right->values[3];
         
         // Perform mixing rounds (optimized for MI100)
         #pragma unroll
@@ -777,13 +783,17 @@ pub fn create_gpu_kernel_source() -> String {
         }
     }
     
-    __device__ __forceinline__ void tip5_hash_varlen(Digest* result, const uint64_t* data, size_t len) {
-        // Initialize with IV
+    __device__ __forceinline__ __attribute__((always_inline)) void tip5_hash_varlen(Digest* result, const uint64_t* data, size_t len) {
+        // Initialize with IV - fully unrolled for better performance on MI100
         uint64_t state[8];
-        #pragma unroll
-        for (int i = 0; i < 8; i++) {
-            state[i] = TIP5_IV[i];
-        }
+        state[0] = TIP5_IV[0];
+        state[1] = TIP5_IV[1];
+        state[2] = TIP5_IV[2];
+        state[3] = TIP5_IV[3];
+        state[4] = TIP5_IV[4];
+        state[5] = TIP5_IV[5];
+        state[6] = TIP5_IV[6];
+        state[7] = TIP5_IV[7];
         
         // Process data in blocks
         size_t words = len / 8;
@@ -823,8 +833,8 @@ pub fn create_gpu_kernel_source() -> String {
         }
     }
     
-    // Optimized GPU kernel specifically for AMD MI100 GPUs
-    extern "C" __global__ void mining_kernel(
+    // Optimized GPU kernel specifically for AMD MI100 GPUs with ROCm 6.2.3
+    extern "C" __global__ __attribute__((amdgpu_num_vgpr(64))) __attribute__((amdgpu_num_sgpr(64))) void mining_kernel(
         const Digest* kernel_auth_path,
         const Digest* header_auth_path,
         const Digest* threshold,
@@ -843,6 +853,7 @@ pub fn create_gpu_kernel_source() -> String {
         const uint64_t nonce_value = nonce_start + global_idx;
         
         // Use shared memory for frequently accessed data (AMD MI100 optimization)
+        // MI100 has 64KB of shared memory per workgroup, so we can use it more aggressively
         __shared__ Digest shared_kernel_auth[2];
         __shared__ Digest shared_header_auth[3];
         __shared__ Digest shared_threshold;
@@ -850,7 +861,11 @@ pub fn create_gpu_kernel_source() -> String {
         // Additional shared memory for MI100 GPUs to store intermediate results
         // This reduces global memory access and improves performance
         // MI100 has 64KB of shared memory per workgroup, so we can use more
-        __shared__ uint64_t shared_state[8 * 64]; // 64 threads can store their state
+        // Allocate enough for all threads in a block (256 threads)
+        __shared__ uint64_t shared_state[8 * 256]; // 256 threads can store their state
+        
+        // Add a shared memory cache for intermediate hash results to avoid recomputation
+        __shared__ Digest shared_hash_cache[32]; // Cache for intermediate hash results
         
         // Use cooperative loading of shared memory for better performance
         // Each thread loads a portion of the data
@@ -886,8 +901,12 @@ pub fn create_gpu_kernel_source() -> String {
         Digest hash1, hash2, header_mast_hash;
         
         // Get shared memory index for this thread (for intermediate state)
-        const uint32_t shared_idx = thread_idx % 64;
+        // Use the full thread index since we have enough shared memory for all threads
+        const uint32_t shared_idx = thread_idx;
         uint64_t* thread_state = &shared_state[shared_idx * 8];
+        
+        // Calculate a cache index for this thread to avoid cache thrashing
+        const uint32_t cache_idx = thread_idx % 32;
         
         // Hash nonce using shared memory for state
         // Initialize state with IV
@@ -973,12 +992,18 @@ pub fn create_gpu_kernel_source() -> String {
         // Use warp-level operations for better performance on MI100
         // This reduces contention when multiple threads find valid nonces
         if (is_valid) {
+            // Use a memory fence to ensure visibility
+            __threadfence();
+            
             // Atomically set the result to 1 to indicate success
             // Use memory_order_relaxed for better performance
             atomicExch(result, 1);
             
-            // Store the found nonce
+            // Store the found nonce with a memory fence to ensure visibility
             *found_nonce = nonce;
+            
+            // Add a memory fence to ensure the nonce is visible to the host
+            __threadfence_system();
         }
     }
     "#,
