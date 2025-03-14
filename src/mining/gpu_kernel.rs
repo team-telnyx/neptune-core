@@ -62,8 +62,23 @@ impl MiningKernel {
         result: *mut u64,
         found_nonce: *mut Digest,
     ) -> Result<(), String> {
-        const THREADS_PER_BLOCK: u32 = 256;
-        let blocks = ((self.nonce_range as u32) + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        // Optimize thread block size for MI100 GPUs
+        let threads_per_block = if self.device_name.contains("MI100") {
+            // MI100 GPUs perform better with larger thread blocks
+            512
+        } else {
+            // Default for other GPUs
+            256
+        };
+        
+        info!("Using {} threads per block for {}", threads_per_block, self.device_name);
+        
+        // Calculate number of blocks based on nonce range and thread block size
+        let blocks = ((self.nonce_range as u64) + (threads_per_block as u64) - 1) / (threads_per_block as u64);
+        
+        // Ensure we don't exceed the maximum grid size
+        let max_blocks = 65535; // Maximum grid size in one dimension
+        let blocks = std::cmp::min(blocks as u32, max_blocks);
 
         // Launch configuration
         let grid = dim3 {
@@ -72,7 +87,7 @@ impl MiningKernel {
             z: 1,
         };
         let block = dim3 {
-            x: THREADS_PER_BLOCK,
+            x: threads_per_block,
             y: 1,
             z: 1,
         };
@@ -454,6 +469,16 @@ impl MiningKernel {
                     // For ROCm 6.2.3, we need to avoid using the problematic flags
                     // that cause compilation errors
                     info!("Avoiding problematic flags for ROCm 6.2.3 that cause compilation errors");
+                    
+                    // Add additional debug information for ROCm 6.2.3
+                    info!("ROCm 6.2.3 detected, checking hipcc version details");
+                    let hipcc_version_details = std::process::Command::new("hipcc")
+                        .arg("--version")
+                        .output()
+                        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+                        .unwrap_or_else(|_| "Failed to get hipcc version details".to_string());
+                    
+                    info!("hipcc version details: {}", hipcc_version_details);
                 } else {
                     // Generic ROCm 6.x flags
                     compiler_args.extend_from_slice(&[
@@ -522,6 +547,28 @@ impl MiningKernel {
         
         // Try to compile the kernel using hipcc with the determined flags
         info!("Compiling GPU kernel with hipcc using flags: {:?}", compiler_args);
+        
+        // For ROCm 6.2.3, we need to ensure we're not using any problematic flags
+        // Check if we're using ROCm 6.2.3 and remove any problematic flags
+        if major == 6 && minor == 2 {
+            // Filter out any problematic flags that might cause compilation errors
+            let problematic_flags = [
+                "--amdgpu-sroa=0", 
+                "--amdgpu-load-store-vectorizer=0", 
+                "--amdgpu-enable-flat-scratch"
+            ];
+            
+            // Log if we found and removed any problematic flags
+            let original_count = compiler_args.len();
+            compiler_args.retain(|arg| !problematic_flags.iter().any(|&flag| arg.contains(flag)));
+            let new_count = compiler_args.len();
+            
+            if original_count != new_count {
+                info!("Removed {} problematic flags for ROCm 6.2.3", original_count - new_count);
+                info!("Final compiler flags: {:?}", compiler_args);
+            }
+        }
+        
         let output = std::process::Command::new("hipcc")
             .args(&compiler_args)
             .output();
@@ -545,6 +592,27 @@ impl MiningKernel {
                 }
 
                 if !output.status.success() {
+                    // Provide more detailed error information for ROCm 6.2.3
+                    if major == 6 && minor == 2 {
+                        error!("ROCm 6.2.3 compilation failed. This might be due to incompatible compiler flags.");
+                        error!("Checking for specific error patterns in the output...");
+                        
+                        // Check for specific error patterns
+                        if stderr.contains("unknown argument") {
+                            let mut unknown_args = Vec::new();
+                            for line in stderr.lines() {
+                                if line.contains("unknown argument") {
+                                    unknown_args.push(line.trim());
+                                }
+                            }
+                            
+                            if !unknown_args.is_empty() {
+                                error!("Detected unknown arguments: {:?}", unknown_args);
+                                return Err(format!("Failed to compile GPU kernel with ROCm 6.2.3: Unknown arguments detected: {:?}. Please update compiler flags.", unknown_args));
+                            }
+                        }
+                    }
+                    
                     return Err(format!("Failed to compile GPU kernel: {}", stderr));
                 }
 
@@ -834,7 +902,8 @@ pub fn create_gpu_kernel_source() -> String {
     }
     
     // Optimized GPU kernel specifically for AMD MI100 GPUs with ROCm 6.2.3
-    extern "C" __global__ __attribute__((amdgpu_num_vgpr(64))) __attribute__((amdgpu_num_sgpr(64))) void mining_kernel(
+    // Using attributes that are compatible with ROCm 6.2.3
+    extern "C" __global__ void mining_kernel(
         const Digest* kernel_auth_path,
         const Digest* header_auth_path,
         const Digest* threshold,

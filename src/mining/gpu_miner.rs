@@ -703,10 +703,14 @@ impl GpuMiner {
             // MI100 GPUs can handle larger batches
             let nonce_range = if self.device_name.contains("MI100") {
                 // MI100 has 120 compute units, can handle larger batches
-                5_000_000_000 // 5 billion nonces per kernel launch for MI100
+                // Adjusted for better performance with ROCm 6.2.3
+                10_000_000_000 // 10 billion nonces per kernel launch for MI100
             } else {
                 1_000_000_000 // 1 billion nonces for other GPUs
             };
+            
+            // Log the nonce range for debugging
+            info!("Using nonce range of {} for device: {}", nonce_range, self.device_name);
 
             // Create and launch kernel
             let kernel = MiningKernel::new(difficulty, nonce_start, nonce_range);
