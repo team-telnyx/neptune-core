@@ -488,16 +488,21 @@ impl GpuMiner {
                             compiler_args.push("-march=gfx908".to_string());
                         }
                         
-                        // Add additional MI100-specific optimizations for ROCm 6.2.3
-                        // Use the correct flag format for ROCm 6.2.3
-                        // Note: ROCm 6.2.3 uses different flag format than older versions
-                        if major >= 6 {
-                            // For ROCm 6.x, use the new flag format with double dashes
-                            compiler_args.push("--amdgpu-sroa=0".to_string());
-                            compiler_args.push("--amdgpu-load-store-vectorizer=0".to_string());
-                            compiler_args.push("--amdgpu-enable-flat-scratch".to_string());
+                        // Add additional MI100-specific optimizations
+                        // Note: ROCm 6.2.3 doesn't support some of the flags we were using before
+                        if major >= 6 && minor >= 2 {
+                            // For ROCm 6.2.x, use only the supported flags
+                            info!("Using compatible flags for ROCm 6.2.x");
+                            // No additional flags needed, the basic ones are sufficient
+                        } else if major >= 6 {
+                            // For other ROCm 6.x versions, try with standard flags
+                            info!("Using standard optimization flags for ROCm 6.x");
+                            // Try with standard optimization flags
+                            compiler_args.push("-mllvm".to_string());
+                            compiler_args.push("-amdgpu-sroa=0".to_string());
                         } else {
-                            // For older ROCm versions, use -mllvm prefix
+                            // For older ROCm versions, use -mllvm prefix with all optimizations
+                            info!("Using full optimization flags for ROCm {}.{}", major, minor);
                             compiler_args.push("-mllvm".to_string());
                             compiler_args.push("-amdgpu-sroa=0".to_string());
                             compiler_args.push("-mllvm".to_string());
@@ -538,17 +543,67 @@ impl GpuMiner {
                     Ok(output) => {
                         if !output.status.success() {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            error!("FATAL: Failed to compile GPU kernel: {}", stderr);
-                            panic!(
-                                "GPU initialization failed: Cannot compile GPU kernel: {}",
-                                stderr
-                            );
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            
+                            // Check for specific error patterns
+                            if stderr.contains("unknown argument") {
+                                error!("FATAL: Failed to compile GPU kernel due to unsupported compiler flags: {}", stderr);
+                                
+                                // Try again with minimal flags
+                                info!("Attempting to compile with minimal flags as fallback");
+                                
+                                // Clear previous args and use only essential ones
+                                compiler_args.clear();
+                                compiler_args.push("--genco".to_string());
+                                compiler_args.push("-O3".to_string());
+                                
+                                if has_mi100 {
+                                    compiler_args.push("--offload-arch=gfx908".to_string());
+                                }
+                                
+                                compiler_args.push("-o".to_string());
+                                compiler_args.push("mining_kernel.hsaco".to_string());
+                                compiler_args.push("mining_kernel.cpp".to_string());
+                                
+                                info!("Retrying compilation with minimal flags: {:?}", compiler_args);
+                                
+                                let retry_output = std::process::Command::new("hipcc")
+                                    .args(&compiler_args)
+                                    .output();
+                                    
+                                match retry_output {
+                                    Ok(retry_result) => {
+                                        if retry_result.status.success() {
+                                            let retry_stdout = String::from_utf8_lossy(&retry_result.stdout);
+                                            if !retry_stdout.is_empty() {
+                                                info!("Compiler output (retry): {}", retry_stdout);
+                                            }
+                                            info!("Successfully compiled GPU kernel with minimal flags");
+                                        } else {
+                                            let retry_stderr = String::from_utf8_lossy(&retry_result.stderr);
+                                            error!("FATAL: Failed to compile GPU kernel even with minimal flags: {}", retry_stderr);
+                                            panic!("GPU initialization failed: Cannot compile GPU kernel with minimal flags: {}", retry_stderr);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        error!("FATAL: Failed to execute hipcc during retry: {}", e);
+                                        panic!("GPU initialization failed: Cannot execute hipcc during retry: {}", e);
+                                    }
+                                }
+                            } else {
+                                error!("FATAL: Failed to compile GPU kernel: {}", stderr);
+                                if !stdout.is_empty() {
+                                    error!("Compiler stdout: {}", stdout);
+                                }
+                                panic!("GPU initialization failed: Cannot compile GPU kernel: {}", stderr);
+                            }
+                        } else {
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            if !stdout.is_empty() {
+                                info!("Compiler output: {}", stdout);
+                            }
+                            info!("Successfully compiled GPU kernel to mining_kernel.hsaco");
                         }
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        if !stdout.is_empty() {
-                            info!("Compiler output: {}", stdout);
-                        }
-                        info!("Successfully compiled GPU kernel to mining_kernel.hsaco");
                     }
                     Err(e) => {
                         error!("FATAL: Failed to execute hipcc: {}", e);
